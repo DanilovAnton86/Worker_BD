@@ -72,11 +72,11 @@ def init_database():
             name TEXT NOT NULL,
             FOREIGN KEY (id_pr) REFERENCES Project(id) ON DELETE CASCADE,
             FOREIGN KEY (id_per) REFERENCES Person(id) ON DELETE CASCADE,
-            UNIQUE(id_pr, id_per) -- «ащита: один сотрудник на одном проекте имеет одну учетку TP
+            UNIQUE(id_pr, id_per)
         );
     ''')
     conn.commit()
-    print("—труктура базы данных успешно создана!")
+    print("ALL Correct!")
     conn.close()
 
     if __name__ == '__main__':
