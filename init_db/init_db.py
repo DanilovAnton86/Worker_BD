@@ -1,8 +1,11 @@
+import os
 import sqlite3
 
 def init_database():
     # Подключаемся к файлу БД (если его нет, он создастся автоматически)
-    conn = sqlite3.connect('UZ_OP.db')
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(current_dir, 'UZ_OP.db')
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     # Включаем поддержку внешних ключей (чтобы работало каскадное удаление)
@@ -78,6 +81,5 @@ def init_database():
     conn.commit()
     print("ALL Correct!")
     conn.close()
-
-    if __name__ == '__main__':
-        init_database()
+if __name__ == '__main__':
+    init_database()
