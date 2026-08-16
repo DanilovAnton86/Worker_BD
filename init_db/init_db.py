@@ -25,6 +25,7 @@ def init_database():
             email_telescope TEXT UNIQUE,
             email_cross TEXT UNIQUE,
             password_email TEXT
+            status INTEGER DEFAULT 1
         );
     ''')
 
