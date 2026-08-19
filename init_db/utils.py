@@ -34,23 +34,23 @@ def transliterate(text: str) -> str:
     cleaned = text.lower().strip()
     return "".join(rules.get(char, char) for char in cleaned)
 
-def parse_fio_and_make_login(fio_str: str):
-    """Очищает ФИО от лишних пробелов, разбивает на Фамилию, Имя, Отчество и генерирует логин"""
-    # Разбиваем по пробелам и убираем пустые элементы
+def parse_fio_and_make_login(fio_str: str, f_len: int = 1, c_len: int = 1):
     parts = [p.strip() for p in fio_str.split() if p.strip()]
     
     if len(parts) < 2:
-        raise ValueError("ФИО должно содержать как минимум Фамилию и Имя")
+        raise ValueError("FIO must contain at least LastName and FirstName")
         
-    second_name = parts[0].capitalize()  # Фамилия (Иванова)
-    first_name = parts[1].capitalize()   # Имя (Кульжьян)
-    curname = parts[2].capitalize() if len(parts) > 2 else "" # Отчество (Базарбаевна)
+    second_name = parts[0].capitalize()  # Фамилия
+    first_name = parts[1].capitalize()   # Имя
+    curname = parts[2].capitalize() if len(parts) > 2 else "" # Отчество
     
-    # Генерация логина: первая буква имени . первая буква отчества . фамилия
-    # Берем первый символ [0] от транслитерированного имени/отчества
-    f_letter = transliterate(first_name)[0] if first_name else ""
-    c_letter = transliterate(curname)[0] if curname else ""
     s_name_trans = transliterate(second_name)
+    f_name_trans = transliterate(first_name)
+    c_name_trans = transliterate(curname) if curname else ""
+    
+    # Исправлено: берем строго динамическую длину букв, которую просит бэкенд
+    f_letter = f_name_trans[:f_len] if f_name_trans else ""
+    c_letter = c_name_trans[:c_len] if c_name_trans else ""
     
     if c_letter:
         login_ad = f"{f_letter}.{c_letter}.{s_name_trans}"
