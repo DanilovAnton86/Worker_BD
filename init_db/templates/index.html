@@ -399,6 +399,64 @@
         </form>
     </div>
 
+    <!-- Форма заливки сотрудников файлом -->
+        <hr style="margin: 40px 0; border: 0; border-top: 1px solid #ccc;">
+
+    <div class="search-box" style="max-width: 700px;">
+        <h3>Массовый импорт сотрудников (Excel / TXT)</h3>
+        <!-- Атрибут enctype="multipart/form-data" ОБЯЗАТЕЛЕН для загрузки файлов -->
+        <form action="/import_file" method="post" enctype="multipart/form-data" id="importForm">
+            <div style="margin-bottom: 15px;">
+                <label>Выберите файл (.xlsx или .txt):</label><br>
+                <input type="file" name="file" accept=".xlsx,.txt" style="margin-top: 5px;" required id="fileInput" onchange="toggleImportOptions()">
+            </div>
+
+            <!-- Этот блок скрыт по умолчанию и показывается только для TXT (или если в Excel нет данных) -->
+            <div id="extraImportOptions" style="display: none; background: #e9ecef; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                <h4 style="margin-top: 0;">Параметры для строк без указанного проекта/локации</h4>
+                
+                <div style="margin-bottom: 10px;">
+                    <label><strong>Проект (выберите один):</strong></label><br>
+                    <select name="default_project" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        <option value="">-- Не выбрано (пропустить привязку) --</option>
+                        {% for project in project_list %}
+                            <option value="{{ project }}">{{ project }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label><strong>Формат работы (Локация):</strong></label><br>
+                    <div style="margin-top: 5px;">
+                        <label><input type="checkbox" name="default_places" value="Офис"> Офис</label>
+                        <label style="margin-left: 15px;"><input type="checkbox" name="default_places" value="Дом"> Дом</label>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" style="background-color: #007bff;">Загрузить и проверить на тёзок</button>
+        </form>
+    </div>
+
+    <!-- Маленький JS для управления показом доп. опций -->
+    <script>
+        function toggleImportOptions() {
+            const fileInput = document.getElementById('fileInput');
+            const extraOptions = document.getElementById('extraImportOptions');
+            
+            if (fileInput.files.length > 0) {
+                const fileName = fileInput.files[0].name;
+                // Если расширение .txt, показываем блок выбора проекта и локации
+                if (fileName.endsWith('.txt')) {
+                    extraOptions.style.display = 'block';
+                } else {
+                    extraOptions.style.display = 'none'; // Для Excel прячем (но позже сделаем умнее)
+                }
+            }
+        }
+    </script>
+
+
     <!-- МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ -->
     <div id="editModal" class="modal-overlay">
         <div class="modal-content" style="max-width: 500px;">
