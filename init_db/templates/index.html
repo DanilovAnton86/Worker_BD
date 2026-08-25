@@ -257,24 +257,86 @@
 
     <h2>Учётные записи сотрудников OP_DB</h2>
 
-    <div class="search-box">
-        <h3>Поиск сотрудника</h3>
-        <form action="/search" method="get">
-            <input type="text" name="query" placeholder="Введите фамилию или логин AD..." value="{{ search_query if search_query else '' }}" required>
-            <button type="submit">Найти</button>
-        </form>
-        <div class="counter">Всего записей в базе данных: <strong>{{ total_count }}</strong></div>
-    </div>
+    <!-- 1. ПАНЕЛЬ ПОИСКА И ФИЛЬТРОВ НА ВСЮ ШИРИНУ -->
+    <div class="search-box" style="max-width: 100%; box-sizing: border-box; background: #ffffff; border: 1px solid #e0e0e0; margin-bottom: 20px;">
+        <form action="/search" method="get" id="mainSearchForm" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
 
+            <div style="flex: 2; min-width: 200px;">
+                <label style="font-weight: bold; font-size: 13px; color: #555;">Поиск сотрудника:</label>
+                <input type="text" name="query" placeholder="Введите фамилию или логин AD..." value="{{ search_query if search_query else '' }}" style="width: 100%; box-sizing: border-box; padding: 10px; margin-top: 5px;">
+            </div>
+
+            <div style="flex: 1; min-width: 130px;">
+                <label style="font-weight: bold; font-size: 13px; color: #555;">Статус:</label>
+                <select name="status_filter" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;" onchange="document.getElementById('mainSearchForm').submit()">
+                    <option value="all" {% if status_filter=='all' or not status_filter %}selected{% endif %}>Все статусы</option>
+                    <option value="1" {% if status_filter=='1' %}selected{% endif %}>Активен</option>
+                    <option value="0" {% if status_filter=='0' %}selected{% endif %}>Уволен</option>
+                    <option value="2" {% if status_filter=='2' %}selected{% endif %}>Декрет</option>
+                </select>
+            </div>
+
+            <div style="flex: 1; min-width: 150px; background: #f8f9fa; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; height: 40px; display: flex; align-items: center; gap: 8px;">
+                <label style="font-weight: bold; font-size: 13px; color: #555; margin-right: 2px;">Локация:</label>
+                <label style="cursor:pointer; font-size: 13px;"><input type="checkbox" name="place_filter" value="Офис" {% if 'Офис' in place_filter %}checked{% endif %} onchange="document.getElementById('mainSearchForm').submit()"> Офис</label>
+                <label style="cursor:pointer; font-size: 13px;"><input type="checkbox" name="place_filter" value="Дом" {% if 'Дом' in place_filter %}checked{% endif %} onchange="document.getElementById('mainSearchForm').submit()"> Дом</label>
+            </div>
+
+            <div style="flex: 1.5; min-width: 160px;">
+                <label style="font-weight: bold; font-size: 13px; color: #555;">Проект:</label>
+                <select name="project_filter" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;" onchange="document.getElementById('mainSearchForm').submit()">
+                    <option value="all" {% if project_filter=='all' or not project_filter %}selected{% endif %}>Все проекты</option>
+                    {% for project in project_list %}
+                    <option value="{{ project }}" {% if project_filter==project %}selected{% endif %}>{{ project }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="width: 80px;">
+                <label style="font-weight: bold; font-size: 13px; color: #555;">Строк:</label>
+                <select name="limit" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;" onchange="document.getElementById('mainSearchForm').submit()">
+                    <option value="50" {% if limit==50 %}selected{% endif %}>50</option>
+                    <option value="100" {% if limit==100 %}selected{% endif %}>100</option>
+                    <option value="all" {% if limit=='all' or limit==0 %}selected{% endif %}>Все</option>
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 8px;">
+                <button type="submit" style="height: 40px; padding: 0 20px;">Найти</button>
+                <button type="button" onclick="showAllEmployees()" style="height: 40px; padding: 0 15px; background-color: #6c757d;">Показать всех</button>
+            </div>
+
+            <input type="hidden" name="page" id="currentPageInput" value="{{ current_page if current_page else 1 }}">
+        </form>
+        <!-- ПЛАШКА СЧЁТЧИКА И КНОПКИ ОЧИСТКИ ТАБЛИЦЫ -->
+        <div class="counter" style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div>Всего записей в базе данных: <strong>{{ total_count }}</strong></div>
+            <!-- Кнопка очистки: отображается всегда, сбрасывает таблицу на экране -->
+            <button type="button" onclick="clearResultsTable()" style="background-color: #dc3545; padding: 5px 12px; font-size: 13px; height: auto;">Очистить таблицу</button>
+        </div>
+    </div>
+    <!-- 2. ТАБЛИЦА РЕЗУЛЬТАТОВ (ВЫВОДИТСЯ НАВЕРХУ) -->
     {% if search_query is defined %}
     <h3>Результаты поиска по запросу "{{ search_query }}"</h3>
+
     {% if results %}
+    <!-- ВЕРХНИЙ БЛОК ПАГИНАЦИИ -->
+    {% if limit and limit != 'all' and total_pages > 1 %}
+    <div style="margin: 10px 0; display: flex; justify-content: center; align-items: center; gap: 8px; user-select: none; background: #fff; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+        <button type="button" onclick="changePage(1)" {% if current_page==1 %}disabled style="opacity:0.5;" {% endif %}>&laquo; В начало</button>
+        <button type="button" onclick="changePage({{ current_page - 1 }})" {% if current_page==1 %}disabled style="opacity:0.5;" {% endif %}>&larr; Назад</button>
+        <span style="font-size: 14px;">Страница <input type="number" value="{{ current_page }}" min="1" max="{{ total_pages }}" style="width: 50px; text-align: center; padding: 4px;" onkeypress="if(event.key==='Enter') { event.preventDefault(); goToPage(this.value); }"> из <strong>{{ total_pages }}</strong></span>
+        <button type="button" onclick="changePage({{ current_page + 1 }})" {% if current_page==total_pages %}disabled style="opacity:0.5;" {% endif %}>Вперед &rarr;</button>
+        <button type="button" onclick="changePage({{ total_pages }})" {% if current_page==total_pages %}disabled style="opacity:0.5;" {% endif %}>В конец &raquo;</button>
+    </div>
+    {% endif %}
+
     <table class="results-table">
         <thead>
             <tr>
                 <th style="width: 80px; text-align: center;">Действия</th>
                 <th style="width: 100px;">Статус</th>
-                <th>ФИО</th>
+                <th style="cursor: pointer; user-select: none; color: #007bff;" onclick="toggleSort()">ФИО {% if sort_dir == 'asc' %}🔼{% else %}🔽{% endif %}</th>
                 <th>Логин AD</th>
                 <th>Пароль AD</th>
                 <th>Локация</th>
@@ -285,42 +347,129 @@
             {% for person in results %}
             <tr id="row-{{ person.id }}">
                 <td style="text-align: center; white-space: nowrap;">
-                    <span class="action-icon view-icon" title="Посмотреть карточку" onclick="openEmployeeModal({{ person.id }})">&#128065;</span>
-                    <span class="action-icon edit-icon" title="Редактировать" onclick="editEmployee({{ person.id }})">&#9998;</span>
-                    <span class="action-icon delete-icon" title="Удалить сотрудника" onclick="deleteEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">&#10006;</span>
+                    <span class="action-icon view-icon" onclick="openEmployeeModal({{ person.id }})">&#128065;</span>
+                    <span class="action-icon edit-icon" onclick="editEmployee({{ person.id }})">&#9998;</span>
+                    <span class="action-icon delete-icon" onclick="deleteEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">&#10006;</span>
                 </td>
                 <td>
-                    {% if person.status == 1 %}
-                    <span class="status-badge status-1">Активен</span>
-                    {% elif person.status == 0 %}
-                    <span class="status-badge status-0">Уволен</span>
-                    {% elif person.status == 2 %}
-                    <span class="status-badge status-2">Декрет</span>
-                    {% else %}
-                    <span class="status-badge">{{ person.status }}</span>
-                    {% endif %}
+                    {% if person.status == 1 %}<span class="status-badge status-1">Активен</span>
+                    {% elif person.status == 0 %}<span class="status-badge status-0">Уволен</span>
+                    {% elif person.status == 2 %}<span class="status-badge status-2">Декрет</span>{% endif %}
                 </td>
                 <td><strong>{{ person.second_name }}</strong> {{ person.first_name }} {{ person.curname if person.curname else '' }}</td>
                 <td><code>{{ person.login_ad }}</code></td>
                 <td><span style="font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px;">{{ person.password_ad if person.password_ad else '-' }}</span></td>
-                <td>
-                    {% for place in person.places %}
-                    <span class="badge badge-place">{{ place }}</span>
-                    {% endfor %}
-                </td>
-                <td>
-                    {% for project in person.projects %}
-                    <span class="badge">{{ project }}</span>
-                    {% endfor %}
-                </td>
+                <td>{% for place in person.places %}<span class="badge badge-place">{{ place }}</span>{% endfor %}</td>
+                <td>{% for project in person.projects %}<span class="badge">{{ project }}</span>{% endfor %}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
+    <!-- НИЖНИЙ БЛОК ПАГИНАЦИИ -->
+    {% if limit and limit != 'all' and total_pages > 1 %}
+    <div style="margin: 15px 0; display: flex; justify-content: center; align-items: center; gap: 8px; user-select: none; background: #fff; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+        <button type="button" onclick="changePage(1)" {% if current_page==1 %}disabled style="opacity:0.5;" {% endif %}>&laquo; В начало</button>
+        <button type="button" onclick="changePage({{ current_page - 1 }})" {% if current_page==1 %}disabled style="opacity:0.5;" {% endif %}>&larr; Назад</button>
+        <span style="font-size: 14px;">Страница <input type="number" value="{{ current_page }}" min="1" max="{{ total_pages }}" style="width: 50px; text-align: center; padding: 4px;" onkeypress="if(event.key==='Enter') { event.preventDefault(); goToPage(this.value); }"> из <strong>{{ total_pages }}</strong></span>
+        <button type="button" onclick="changePage({{ current_page + 1 }})" {% if current_page==total_pages %}disabled style="opacity:0.5;" {% endif %}>Вперед &rarr;</button>
+        <button type="button" onclick="changePage({{ total_pages }})" {% if current_page==total_pages %}disabled style="opacity:0.5;" {% endif %}>В конец &raquo;</button>
+    </div>
+    {% endif %}
     {% else %}
-    <div class="no-results">Сотрудники по вашему запросу не найдены.</div>
+    <div class="no-results" style="margin-bottom: 20px;">Сотрудники по вашему запросу не найдены.</div>
     {% endif %}
     {% endif %}
+    <!-- 3. НИЖНИЙ МЕНЕДЖЕР УПРАВЛЕНИЯ (ДОБАВЛЕНИЕ 2/3, ФАЙЛЫ 1/3) -->
+    <div style="display: flex; gap: 20px; align-items: stretch; margin-top: 30px; margin-bottom: 40px; width: 100%; box-sizing: border-box;">
+
+        <!-- ЛЕВАЯ ЧАСТЬ (2/3 ЭКРАНА): ДОБАВЛЕНИЕ СОТРУДНИКА -->
+        <div class="search-box" style="flex: 2; margin-bottom: 0; max-width: 100%; background: #ffffff; border: 1px solid #e0e0e0; padding: 20px; box-sizing: border-box;">
+            <h3 style="margin-top: 0; color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 8px;">Добавить нового сотрудника</h3>
+            <form action="/add_user" method="post" id="addUserForm">
+                <input type="hidden" name="current_search" value="{{ search_query if search_query else '' }}">
+                <input type="hidden" id="js_is_confirmed" name="is_lookalike" value="false">
+
+                <!-- Контейнер сетки: делит форму на левую часть (Данные) и правую (Привязки) -->
+                <div style="display: flex; gap: 20px; width: 100%; align-items: flex-start;">
+
+                    <!-- ЛЕВАЯ СТОРОНА: ФИО, ТЕЛЕФОН, ДАТА РОЖДЕНИЯ -->
+                    <div style="flex: 1.2; display: flex; flex-direction: column; gap: 12px;">
+                        <div>
+                            <label style="font-size: 13px; font-weight: bold; color: #555;">ФИО сотрудника (в одну строку):</label>
+                            <input type="text" name="fio" style="width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px;" required>
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; font-weight: bold; color: #555;">Телефон (только цифры):</label>
+                            <input type="text" name="phone" style="width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px;" pattern="^[+]?[0-9\s\-]*$" title="Разрешены только цифры" maxlength="20">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; font-weight: bold; color: #555;">День рождения:</label>
+                            <input type="text" name="birthday" style="width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-top: 4px;" placeholder="ДД.ММ.ГГГГ" onfocus="(this.type='date')" onblur="if(!this.value) { this.type='text'; } else { this.type='text'; this.value = this.value.split('-').reverse().join('.'); }">
+                        </div>
+                    </div>
+
+                    <!-- ПРАВАЯ СТОРОНА: ЛОКАЦИЯ И ПРОЕКТЫ -->
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 12px;">
+                        <div>
+                            <label style="font-size: 13px; font-weight: bold; color: #555;">Локация:</label>
+                            <div style="margin-top: 4px; background: #f8f9fa; padding: 8px; border: 1px solid #ccc; border-radius: 4px; height: 38px; box-sizing: border-box; display: flex; align-items: center; gap: 15px;">
+                                <label style="font-size:14px; cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="places" value="Офис" checked> Офис</label>
+                                <label style="font-size:14px; cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="places" value="Дом"> Дом</label>
+                            </div>
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; font-weight: bold; color: #555;">Проекты (выберите нужные):</label>
+                            <!-- Жестко зафиксировали высоту скролл-бокса, чтобы нижняя линия совпала с левым блоком -->
+                            <div style="height: 117px; overflow-y: auto; border: 1px solid #ccc; padding: 6px; margin-top: 4px; border-radius: 4px; background: #fff; box-sizing: border-box;">
+                                {% for project in project_list %}
+                                <label style="display: block; margin-bottom: 4px; font-size: 13px; cursor: pointer;">
+                                    <input type="checkbox" name="projects" value="{{ project }}"> {{ project }}
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" style="background-color: #28a745; width: 100%; padding: 12px; font-weight: bold; margin-top: 15px; border: none; color: white; border-radius: 4px; cursor: pointer;">Создать сотрудника</button>
+            </form>
+        </div>
+
+        <!-- ПРАВАЯ ЧАСТЬ (1/3 ЭКРАНА): МАССОВЫЕ ФАЙЛОВЫЕ ОПЕРАЦИИ -->
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 15px;">
+
+            <!-- Блок: Массовый импорт новичков -->
+            <div class="search-box" style="margin-bottom: 0; padding: 15px; background: #ffffff; border: 1px solid #e0e0e0; flex: 1; box-sizing: border-box;">
+                <h3 style="margin-top: 0; font-size: 15px; color: #007bff; border-bottom: 1px solid #eee; padding-bottom: 6px;">Массовый импорт (Excel / TXT)</h3>
+                <form action="/import_file" method="post" enctype="multipart/form-data" id="importForm">
+                    <input type="file" name="file" accept=".xlsx,.txt" style="width: 100%; font-size: 13px;" required id="fileInput" onchange="toggleImportOptions()">
+                    <div id="extraImportOptions" style="display: none; background: #f8f9fa; padding: 8px; border-radius: 4px; margin-top: 8px; border: 1px solid #ddd;">
+                        <select name="default_project" style="width: 100%; padding: 6px; font-size: 12px;">
+                            <option value="">-- Выберите проект --</option>
+                            {% for project in project_list %}
+                            <option value="{{ project }}">{{ project }}</option> {% endfor %}
+                        </select>
+                        <div style="margin-top: 6px; font-size: 12px;">
+                            <label><input type="checkbox" name="default_places" value="Офис"> Офис</label>
+                            <label style="margin-left: 10px;"><input type="checkbox" name="default_places" value="Дом"> Дом</label>
+                        </div>
+                    </div>
+                    <button type="submit" style="background-color: #007bff; width: 100%; margin-top: 10px; padding: 8px; font-size: 13px; color: white; border: none; border-radius: 4px; cursor: pointer;">Загрузить файл новичков</button>
+                </form>
+            </div>
+
+            <!-- Блок: Дообогащение существующей базы -->
+            <div class="search-box" style="margin-bottom: 0; padding: 15px; background: #ffffff; border: 1px solid #e0e0e0; border-left: 4px solid #28a745; flex: 1; box-sizing: border-box;">
+                <h3 style="margin-top: 0; font-size: 15px; color: #28a745; border-bottom: 1px solid #eee; padding-bottom: 6px;">Дообогащение данных</h3>
+                <form action="/enrich_file" method="post" enctype="multipart/form-data">
+                    <input type="file" name="file" accept=".xlsx" style="width: 100%; font-size: 13px;" required>
+                    <button type="submit" style="background-color: #28a745; width: 100%; margin-top: 10px; padding: 8px; font-size: 13px; color: white; border: none; border-radius: 4px; cursor: pointer;">Сверить контакты с БД</button>
+                </form>
+            </div>
+
+        </div>
+    </div>
 
     <!-- МОДАЛЬНОЕ ОКНО ПРОСМОТРА КАРТОЧКИ -->
     <div id="employeeModal" class="modal-overlay" onclick="closeEmployeeModal(event)">
@@ -350,113 +499,6 @@
         </div>
     </div>
 
-    <hr style="margin: 40px 0; border: 0; border-top: 1px solid #ccc;">
-
-    <!-- ФОРМА ДОБАВЛЕНИЯ НОВОГО СОТРУДНИКА -->
-    <div class="search-box" style="max-width: 700px;">
-        <h3>Добавить нового сотрудника</h3>
-        <form action="/add_user" method="post" id="addUserForm">
-            <input type="hidden" name="current_search" value="{{ search_query if search_query else '' }}">
-            <input type="hidden" id="js_is_confirmed" name="is_lookalike" value="false">
-
-            <div style="margin-bottom: 15px;">
-                <label>ФИО сотрудника (в одну строку, например: Иванов Иван Иванович):</label><br>
-                <input type="text" name="fio" style="width: 95%; margin-top: 5px;" required>
-            </div>
-
-            <div style="margin-bottom: 15px;">
-                <label>Телефон (только цифры, макс. 15 символов):</label><br>
-                <input type="text" name="phone" style="width: 95%; margin-top: 5px;" pattern="^[+]?[0-9\s\-]*$" title="Разрешены только цифры" maxlength="20">
-            </div>
-
-            <div style="margin-bottom: 15px;">
-                <label>День рождения (выберите из календаря или введите вручную):</label><br>
-                <div style="width: 95%; margin-top: 5px;">
-                    <input type="text" name="birthday" style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-shadow: none;" placeholder="ДД.ММ.ГГГГ" onfocus="(this.type='date')" onblur="if(!this.value) { this.type='text'; } else { this.type='text'; this.value = this.value.split('-').reverse().join('.'); }">
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 20px; margin-bottom: 15px;">
-                <div style="flex: 1;">
-                    <label><strong>Локация:</strong></label><br>
-                    <div style="margin-top: 8px; background: #fff; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
-                        <label style="display:block; margin-bottom: 5px;"><input type="checkbox" name="places" value="Офис" checked> Офис</label>
-                        <label style="display:block;"><input type="checkbox" name="places" value="Дом"> Дом</label>
-                    </div>
-                </div>
-                <div style="flex: 1;">
-                    <label><strong>Проекты:</strong></label><br>
-                    <div style="max-height: 160px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 5px; border-radius: 4px; background: #fff;">
-                        {% for project in project_list %}
-                        <label style="display: block; margin-bottom: 5px;">
-                            <input type="checkbox" name="projects" value="{{ project }}"> {{ project }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-            <button type="submit" style="background-color: #28a745;">Создать сотрудника</button>
-        </form>
-    </div>
-
-    <!-- Форма заливки сотрудников файлом -->
-        <hr style="margin: 40px 0; border: 0; border-top: 1px solid #ccc;">
-
-    <div class="search-box" style="max-width: 700px;">
-        <h3>Массовый импорт сотрудников (Excel / TXT)</h3>
-        <!-- Атрибут enctype="multipart/form-data" ОБЯЗАТЕЛЕН для загрузки файлов -->
-        <form action="/import_file" method="post" enctype="multipart/form-data" id="importForm">
-            <div style="margin-bottom: 15px;">
-                <label>Выберите файл (.xlsx или .txt):</label><br>
-                <input type="file" name="file" accept=".xlsx,.txt" style="margin-top: 5px;" required id="fileInput" onchange="toggleImportOptions()">
-            </div>
-
-            <!-- Этот блок скрыт по умолчанию и показывается только для TXT (или если в Excel нет данных) -->
-            <div id="extraImportOptions" style="display: none; background: #e9ecef; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
-                <h4 style="margin-top: 0;">Параметры для строк без указанного проекта/локации</h4>
-                
-                <div style="margin-bottom: 10px;">
-                    <label><strong>Проект (выберите один):</strong></label><br>
-                    <select name="default_project" style="width: 100%; padding: 8px; margin-top: 5px;">
-                        <option value="">-- Не выбрано (пропустить привязку) --</option>
-                        {% for project in project_list %}
-                            <option value="{{ project }}">{{ project }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <div>
-                    <label><strong>Формат работы (Локация):</strong></label><br>
-                    <div style="margin-top: 5px;">
-                        <label><input type="checkbox" name="default_places" value="Офис"> Офис</label>
-                        <label style="margin-left: 15px;"><input type="checkbox" name="default_places" value="Дом"> Дом</label>
-                    </div>
-                </div>
-            </div>
-
-            <button type="submit" style="background-color: #007bff;">Загрузить и проверить на тёзок</button>
-        </form>
-    </div>
-
-    <!-- Маленький JS для управления показом доп. опций -->
-    <script>
-        function toggleImportOptions() {
-            const fileInput = document.getElementById('fileInput');
-            const extraOptions = document.getElementById('extraImportOptions');
-            
-            if (fileInput.files.length > 0) {
-                const fileName = fileInput.files[0].name;
-                // Если расширение .txt, показываем блок выбора проекта и локации
-                if (fileName.endsWith('.txt')) {
-                    extraOptions.style.display = 'block';
-                } else {
-                    extraOptions.style.display = 'none'; // Для Excel прячем (но позже сделаем умнее)
-                }
-            }
-        }
-    </script>
-
-
     <!-- МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ -->
     <div id="editModal" class="modal-overlay">
         <div class="modal-content" style="max-width: 500px;">
@@ -478,10 +520,8 @@
                 </div>
                 <div style="margin-bottom: 15px;">
                     <label>Формат работы (Локация): </label><br>
-                    <div style="margin-top: 5px;">
-                        <label><input type="checkbox" name="places" value="Офис" id="chk_place_office"> Офис</label>
-                        <label style="margin-left: 15px;"><input type="checkbox" name="places" value="Дом" id="chk_place_home"> Дом</label>
-                    </div>
+                    <label><input type="checkbox" name="places" value="Офис" id="chk_place_office"> Офис</label>
+                    <label style="margin-left: 15px;"><input type="checkbox" name="places" value="Дом" id="chk_place_home"> Дом</label>
                 </div>
                 <div style="margin-bottom: 15px;">
                     <label>Проекты (отметьте нужные): </label><br>
@@ -496,6 +536,15 @@
 
     <!-- СКРИПТЫ УПРАВЛЕНИЯ И ВАЛИДАЦИИ -->
     <script>
+        const mainForm = document.getElementById('mainSearchForm');
+        if (!mainForm.querySelector('input[name="sort_dir"]')) {
+            const sortInput = document.createElement('input');
+            sortInput.type = 'hidden';
+            sortInput.name = 'sort_dir';
+            sortInput.value = '{{ sort_dir if sort_dir else "asc" }}';
+            mainForm.appendChild(sortInput);
+        }
+
         async function openEmployeeModal(empld) {
             const modal = document.getElementById('employeeModal');
             document.getElementById('m_fio').innerText = "Загрузка...";
@@ -584,6 +633,71 @@
                 } else { if (isConfirmedInput) isConfirmedInput.value = "true"; form.submit(); }
             } catch (err) { console.error("Ошибка проверки дубликатов:", err); if (isConfirmedInput) isConfirmedInput.value = "true"; form.submit(); }
         });
+
+        function goToPage(value) {
+            const pageNum = parseInt(value);
+            const maxPages = parseInt("{{ total_pages if total_pages else 1 }}");
+            if (pageNum >= 1 && pageNum <= maxPages) { changePage(pageNum); }
+            else { alert("Пожалуйста, введите корректный номер страницы от 1 до " + maxPages); }
+        }
+
+        function toggleSort() {
+            const sortInput = mainForm.querySelector('input[name="sort_dir"]');
+            sortInput.value = (sortInput.value === 'asc') ? 'desc' : 'asc';
+            document.getElementById('currentPageInput').value = 1;
+            mainForm.submit();
+        }
+
+                function changePage(pageNumber) {
+            document.getElementById('currentPageInput').value = pageNumber;
+            mainForm.submit();
+        }
+
+        function showAllEmployees() {
+            document.querySelector('input[name="query"]').value = '';
+            document.getElementById('currentPageInput').value = 1;
+            mainForm.submit();
+        }
+
+        function toggleImportOptions() {
+            const fileInput = document.getElementById('fileInput');
+            const extraOptions = document.getElementById('extraImportOptions');
+            if (fileInput.files.length > 0) {
+                const fileName = fileInput.files[0].name;
+                if (fileName.endsWith('.txt')) { extraOptions.style.display = 'block'; }
+                else { extraOptions.style.display = 'none'; }
+            }
+        }
+
+        function clearResultsTable() {
+            // 1. Очищаем текстовое поле ввода поиска
+            document.querySelector('input[name="query"]').value = '';
+
+            // 2. Ищем заголовок результатов поиска и удаляем его
+            const resultsTitle = document.querySelector('h3[style*="Результаты поиска"]');
+            if (resultsTitle) resultsTitle.remove();
+            const resultsTitleAlt = document.querySelector('h3:not([id])');
+            // Дополнительный поиск заголовка, если у него нет специфических стилей
+            if (resultsTitleAlt && resultsTitleAlt.innerText.includes('Результаты')) resultsTitleAlt.remove();
+
+            // 3. Удаляем саму таблицу результатов, если она выведена на экран
+            const table = document.querySelector('.results-table');
+            if (table) table.remove();
+
+            // 4. Удаляем оба блока пагинации (верхний и нижний)
+            const paginations = document.querySelectorAll('div[style*="justify-content: center"]');
+            paginations.forEach(p => {
+                if (p.innerText.includes('Страница')) p.remove();
+            });
+
+            // 5. Удаляем блок "Сотрудники не найдены", если он горел на экране
+            const noResults = document.querySelector('.no-results');
+            if (noResults) noResults.remove();
+
+            // 6. Красивый трюк: меняем URL в браузере на чистый "/", чтобы при обновлении страницы поиск не возвращался
+            window.history.pushState({}, document.title, "/");
+        }
+
     </script>
 </body>
 </html>

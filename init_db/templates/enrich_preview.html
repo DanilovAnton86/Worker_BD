@@ -1,0 +1,136 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Сверка обновлений данных</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f4f6f9;
+            color: #333;
+        }
+
+        .preview-box {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .enrich-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+            .enrich-table th, .enrich-table td {
+                padding: 12px 15px;
+                text-align: left;
+                border-bottom: 1px solid #e0e0e0;
+            }
+
+            .enrich-table th {
+                background-color: #28a745;
+                color: white;
+                font-weight: bold;
+            }
+
+        /* Стили под ваши ситуации */
+        .row-conflict {
+            background-color: #ffe8cc;
+        }
+        /* Оранжевый — конфликт данных */
+        .row-mismatch {
+            background-color: #e9ecef;
+            color: #6c757d;
+        }
+        /* Серый — не совпали отчества */
+        .row-auto {
+            background-color: #d4edda;
+        }
+        /* Зеленый — чистый апдейт */
+
+        .btn-submit {
+            padding: 12px 24px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+            .btn-submit:hover {
+                background-color: #218838;
+            }
+    </style>
+</head>
+<body>
+
+    <h2>Сверка обновлений контактов</h2>
+
+    <div class="preview-box">
+        <p>Найдено строк для возможного дообогащения: <strong>{{ total_count }}</strong>.</p>
+
+        <form action="/confirm_enrich" method="post">
+            <table class="enrich-table">
+                <thead>
+                    <tr>
+                        <th style="width: 50px; text-align: center;">Обновить</th>
+                        <th>Сотрудник в БД</th>
+                        <th>Данные в БД</th>
+                        <th>Новые данные из файла</th>
+                        <th>Статус сверки</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr class="{% if row.status_type == 'conflict' %}row-conflict{% elif 'partial' in row.status_type %}row-mismatch{% elif row.status_type == 'auto' %}row-auto{% endif %}">
+                        <td style="text-align: center;">
+                            <!-- Чекбокс отправляет индекс строки на бэкенд, если галочка стоит -->
+                            <input type="checkbox" name="enrich_indexes" value="{{ loop.index0 }}" {{ row.auto_check }}>
+
+                            <!-- Передаем скрытые параметры для обновления -->
+                            <input type="hidden" name="db_id_{{ loop.index0 }}" value="{{ row.db_id }}">
+                            <input type="hidden" name="fio_{{ loop.index0 }}" value="{{ row.fio }}">
+                            <input type="hidden" name="new_phone_{{ loop.index0 }}" value="{{ row.new_phone }}">
+                            <input type="hidden" name="new_birthday_{{ loop.index0 }}" value="{{ row.new_birthday }}">
+                            <input type="hidden" name="db_phone_{{ loop.index0 }}" value="{{ row.db_phone }}">
+                            <input type="hidden" name="db_birthday_{{ loop.index0 }}" value="{{ row.db_birthday }}">
+                        </td>
+                        <td>
+                            <strong>{{ row.fio }}</strong>
+                            {% if row.fio != row.file_fio %}
+                            <br><small style="color: #666;">(В файле: {{ row.file_fio }})</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            Тел: {{ row.db_phone if row.db_phone else '—' }}<br>
+                            ДР: {{ row.db_birthday if row.db_birthday else '—' }}
+                        </td>
+                        <td>
+                            Тел: <strong style="color: #155724;">{{ row.new_phone if row.new_phone else '—' }}</strong><br>
+                            ДР: <strong style="color: #155724;">{{ row.new_birthday if row.new_birthday else '—' }}</strong>
+                        </td>
+                        <span>{{ row.info_msg }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div style="margin-top: 30px; text-align: right;">
+                <button type="button" onclick="window.location.href='/'" style="padding: 12px 24px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-right: 10px;">Отмена</button>
+                <button type="submit" class="btn-submit">Применить выбранные обновления</button>
+            </div>
+        </form>
+    </div>
+
+</body>
+</html>

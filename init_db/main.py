@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Form
 from fastapi.responses import RedirectResponse
+from fastapi import Query
 from utils import generate_password, parse_fio_and_make_login, make_touchpoint_login
 
 app = FastAPI(title="Worker Database System")
@@ -26,6 +27,83 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(CURRENT_DIR, "templates"))
 DB_PATH = os.path.join(CURRENT_DIR, 'UZ_OP.db')
 
+def search_employees_advanced(query: str, status_filter: str, place_filter: list[str], project_filter: str, page: int, limit_val: str, sort_dir: str = "asc"):
+    if not os.path.exists(DB_PATH):
+        return [], 0
+        
+    conn = sqlite3.connect(DB_PATH)
+    # НАШ СЕКРЕТНЫЙ РЫЧАГ: Учим SQLite переводить русский язык в нижний регистр силами Python!
+    conn.create_function("LOWER_RU", 1, lambda x: str(x).lower() if x is not None else "")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    sql_base = "FROM Person p"
+    conditions = []
+    params = []
+    
+    if place_filter and len(place_filter) > 0:
+        sql_base += " JOIN Place_Person pp ON p.id = pp.id_per JOIN Place pl ON pp.id_pl = pl.id"
+        extended_places = list(place_filter)
+        if 'Дом' in place_filter and 'УРМ' not in extended_places: extended_places.append('УРМ')
+        if 'УРМ' in place_filter and 'Дом' not in extended_places: extended_places.append('Дом')
+            
+        place_conds = " OR ".join("pl.name = ?" for _ in extended_places)
+        conditions.append(f"({place_conds})")
+        params.extend(extended_places)
+        
+    if project_filter and project_filter != 'all':
+        sql_base += " JOIN Project_Person prp ON p.id = prp.id_per JOIN Project pr ON prp.id_pr = pr.id"
+        conditions.append("pr.name = ?")
+        params.append(project_filter)
+        
+    # ИДЕАЛЬНЫЙ ПОИСК ПО ВХОЖДЕНИЮ С КИРИЛЛИЦЕЙ:
+    # Используем LOWER_RU для поиска любой части слова без привязки к регистру и заглавным буквам
+    if query:
+        conditions.append("(LOWER_RU(p.second_name) LIKE ? OR LOWER_RU(p.login_ad) LIKE ?)")
+        query_lower = query.strip().lower()
+        params.extend([f"%{query_lower}%", f"%{query_lower}%"])
+        
+    if status_filter and status_filter != 'all':
+        conditions.append("p.status = ?")
+        params.append(int(status_filter))
+        
+    where_clause = ""
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+        
+    # 1. Подсчет общего количества (Исправлено: строго res_count[0] для извлечения числа)
+    count_query = f"SELECT COUNT(DISTINCT p.id) {sql_base} {where_clause};"
+    cursor.execute(count_query, tuple(params))
+    res_count = cursor.fetchone()
+    total_found = res_count[0] if res_count else 0
+    
+    direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    order_clause = f" ORDER BY p.second_name {direction}, p.first_name {direction}"
+    
+    sql_select = f"SELECT DISTINCT p.id, p.first_name, p.second_name, p.curname, p.login_ad, p.password_ad, p.phone, p.birthday, p.email_telescope, p.status {sql_base} {where_clause} {order_clause}"
+    
+    if limit_val and limit_val != 'all':
+        limit = int(limit_val)
+        offset = (page - 1) * limit
+        sql_select += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+    sql_select += ";"
+    
+    cursor.execute(sql_select, tuple(params))
+    persons = [dict(row) for row in cursor.fetchall()]
+    
+    for person in persons:
+        per_id = person['id']
+        cursor.execute("SELECT p.name FROM Place p JOIN Place_Person pp ON p.id = pp.id_pl WHERE pp.id_per = ?;", (per_id,))
+        person['places'] = [r['name'] for r in cursor.fetchall()]
+        
+        cursor.execute("SELECT pr.name FROM Project pr JOIN Project_Person pp ON pr.id = pp.id_pr WHERE pp.id_per = ?;", (per_id,))
+        person['projects'] = [r['name'] for r in cursor.fetchall()]
+        
+    conn.close()
+    return persons, total_found
+
 def get_employee_count():
     """Подсчет общего количества людей в базе"""
     if not os.path.exists(DB_PATH):
@@ -37,48 +115,6 @@ def get_employee_count():
     conn.close()
     return res[0] if res else 0
 
-def search_employees(query: str):
-    """Поиск сотрудников по Фамилии или Логину с подтягиванием Проектов и Локаций"""
-    if not os.path.exists(DB_PATH):
-        return []
-    
-    conn = sqlite3.connect(DB_PATH)
-    # Позволяет получать результаты в виде словарей, а не кортежей
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # Ищем людей по Фамилии (LIKE) или по Логину (равенство)
-    search_pattern = f"%{query}%"
-    cursor.execute('''
-        SELECT id, first_name, second_name, curname, login_ad, password_ad, phone, email_telescope, status 
-        FROM Person 
-        WHERE second_name LIKE ? OR login_ad = ?;
-    ''', (search_pattern, query))
-    
-    persons = [dict(row) for row in cursor.fetchall()]
-    
-    # Для каждого найденного сотрудника собираем его проекты и локации
-    for person in persons:
-        per_id = person['id']
-        
-        # Получаем локации (Офис/Дом)
-        cursor.execute('''
-            SELECT p.name FROM Place p
-            JOIN Place_Person pp ON p.id = pp.id_pl
-            WHERE pp.id_per = ?;
-        ''', (per_id,))
-        person['places'] = [r['name'] for r in cursor.fetchall()]
-        
-        # Получаем проекты
-        cursor.execute('''
-            SELECT pr.name FROM Project pr
-            JOIN Project_Person pp ON pr.id = pp.id_pr
-            WHERE pp.id_per = ?;
-        ''', (per_id,))
-        person['projects'] = [r['name'] for r in cursor.fetchall()]
-        
-    conn.close()
-    return persons
 
 @app.get("/employee/{emp_id}")
 def get_employee_details(emp_id: int):
@@ -156,25 +192,71 @@ def delete_employee(emp_id: int):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    """Главная страница: передаем пустые дефолтные фильтры, чтобы Jinja2 не падал"""
     count = get_employee_count()
     return templates.TemplateResponse(
         request=request, 
         name="index.html", 
-        context={"total_count": count, "project_list": PROJECTS_LIST}
+        context={
+            "total_count": count, 
+            "results": [],             # При первом входе таблица пустая
+            "search_query": "",        # Пустой поиск
+            "status_filter": "all",    # Дефолтный статус
+            "place_filter": [],        # Пустые чекбоксы локаций
+            "project_filter": "all",   # Дефолтный проект
+            "current_page": 1,         # Первая страница
+            "limit": 50,               # Дефолтный лимит строк
+            "total_pages": 1,
+            "project_list": PROJECTS_LIST
+        }
     )
 
 @app.get("/search", response_class=HTMLResponse)
-def search(request: Request, query: str):
-    results = search_employees(query)
+def search(
+    request: Request, 
+    query: str = Query(None),
+    status_filter: str = Query("all"),
+    place_filter: list[str] = Query([]),
+    project_filter: str = Query("all"),
+    page: int = Query(1),
+    limit: str = Query("50"),
+    sort_dir: str = Query("asc")
+):
+    search_query_clean = query.strip() if query else ""
+    
+    # Запускаем продвинутую фильтрацию
+    results, total_found = search_employees_advanced(
+        search_query_clean, status_filter, place_filter, project_filter, page, limit, sort_dir
+    )
+    
+    # Исправление деления: вытаскиваем число из кортежа total_found, если он пришел в таком виде
+    actual_total = total_found[0] if isinstance(total_found, (tuple, list)) else total_found
+    
+    import math
+    if limit == 'all':
+        total_pages = 1
+        limit_numeric = 0
+    else:
+        limit_numeric = int(limit)
+        total_pages = math.ceil(actual_total / limit_numeric) if actual_total > 0 else 1
+        
     count = get_employee_count()
+    
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
             "total_count": count,
             "results": results,
-            "search_query": query,
-            "project_list": PROJECTS_LIST # Теперь список проектов не исчезнет после поиска!
+            "search_query": search_query_clean,
+            "status_filter": status_filter,
+            "place_filter": place_filter,
+            "project_filter": project_filter,
+            "current_page": page,
+            "limit": limit_numeric if limit != 'all' else 'all',
+            "total_pages": total_pages,
+            "sort_dir": sort_dir,
+            "project_list": PROJECTS_LIST
         }
     )
 
@@ -308,6 +390,7 @@ def add_user(
     if current_search:
         return RedirectResponse(url=f"/search?query={current_search}", status_code=303)
     return RedirectResponse(url="/", status_code=303)
+
 
 @app.post("/import_file")
 async def import_file(
@@ -462,6 +545,147 @@ async def import_file(
         name="import_preview.html", 
         context={"rows": parsed_rows, "total_count": len(parsed_rows)}
     )
+
+@app.post("/enrich_file")
+async def enrich_file(request: Request, file: UploadFile = File(...)):
+    contents = await file.read()
+    df = pd.read_excel(io.BytesIO(contents), dtype=str)
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    
+    has_fio = "фио" in df.columns
+    has_split_name = "фамилия" in df.columns
+    if not (has_fio or has_split_name):
+        return HTMLResponse(content="<h3>Ошибка: В файле должны быть колонки 'ФИО' или 'Фамилия'</h3>", status_code=400)
+        
+    birthday_col = None
+    for col in ['день рождения', 'дата рождения', 'др', 'рождение', 'birthday']:
+        if col in df.columns:
+            birthday_col = col
+            break
+
+    enrich_rows = []
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    for _, row in df.iterrows():
+        if has_split_name:
+            s_name = str(row.get('фамилия', '')).strip().capitalize()
+            f_name = str(row.get('имя', '')).strip().capitalize()
+            c_name = str(row.get('отчество', '')).strip().capitalize()
+            if f_name.lower() in ['nan', 'none', '']: f_name = ""
+            if c_name.lower() in ['nan', 'none', '']: c_name = ""
+        else:
+            fio_str = str(row.get('фио', '')).strip()
+            fio_parts = [p.strip() for p in fio_str.split() if p.strip()]
+            if len(fio_parts) < 1: continue
+            s_name = fio_parts[0].capitalize()
+            f_name = fio_parts[1].capitalize() if len(fio_parts) > 1 else ""
+            c_name = fio_parts[2].capitalize() if len(fio_parts) > 2 else ""
+
+        if not s_name or s_name == 'Nan':
+            continue
+
+        new_phone = str(row.get('телефон', row.get('phone', ''))).strip()
+        if new_phone.lower() in ['nan', 'none']: new_phone = ""
+        if new_phone.endswith('.0'): new_phone = new_phone[:-2]
+        if new_phone:
+            has_plus = new_phone.startswith('+')
+            digits = re.sub(r'\D', '', new_phone)
+            new_phone = f"+{digits}" if has_plus else digits
+            new_phone = new_phone[:16] if has_plus else new_phone[:15]
+
+        new_birthday = ""
+        if birthday_col:
+            raw_bday = str(row.get(birthday_col, '')).strip()
+            if raw_bday.lower() not in ['nan', 'none', '']:
+                if ' ' in raw_bday:
+                    raw_bday = raw_bday.split()[0]
+                raw_bday = raw_bday.replace('-', '.').replace(',', '.')
+                raw_bday = "".join(ch for ch in raw_bday if ch in "0123456789.")
+                dp = raw_bday.split('.')
+                if len(dp) == 3:
+                    if len(dp[0]) == 4:
+                        new_birthday = f"{dp[2]}.{dp[1]}.{dp[0]}"
+                    else:
+                        new_birthday = raw_bday[:10]
+                else:
+                    new_birthday = raw_bday[:10]
+
+        if not new_phone and not new_birthday:
+            continue
+
+        if f_name:
+            cursor.execute("SELECT id, first_name, second_name, curname, phone, birthday FROM Person WHERE second_name = ? AND first_name = ?;", (s_name, f_name))
+        else:
+            cursor.execute("SELECT id, first_name, second_name, curname, phone, birthday FROM Person WHERE second_name = ?;", (s_name,))
+            
+        db_matches = [dict(r) for r in cursor.fetchall()]
+
+        for db_user in db_matches:
+            db_id = db_user['id']
+            db_first_name = db_user['first_name'] or ""
+            db_curname = db_user['curname'] or ""
+            db_phone = db_user['phone'] or ""
+            db_birthday_raw = db_user['birthday'] or ""
+            
+            db_birthday = ""
+            if db_birthday_raw:
+                if ' ' in db_birthday_raw:
+                    db_birthday_raw = db_birthday_raw.split()[0]
+                db_birthday_raw = db_birthday_raw.replace('-', '.').replace(',', '.')
+                db_birthday_raw = "".join(ch for ch in db_birthday_raw if ch in "0123456789.")
+                dp = db_birthday_raw.split('.')
+                if len(dp) == 3 and len(dp[0]) == 4:
+                    db_birthday = f"{dp[2]}.{dp[1]}.{dp[0]}"
+                else:
+                    db_birthday = db_birthday_raw[:10]
+
+            status_type = "normal" 
+            info_msg = ""
+            auto_check = "checked"
+
+            if not f_name and db_first_name:
+                status_type = "partial_mismatch"
+                info_msg = f"❓ Похожая запись по Фамилии (В базе: {db_first_name} {db_curname}, имя не указано)"
+                auto_check = ""
+            elif db_curname and c_name and db_curname != c_name:
+                status_type = "partial_mismatch"
+                info_msg = f"❓ Похожая запись, но разные отчества (В базе: {db_curname}, в файле: {c_name})"
+                auto_check = ""
+            elif (not db_curname and c_name) or (db_curname and not c_name):
+                status_type = "partial_empty"
+                info_msg = f"❓ Похожая запись (В базе: {db_curname or 'нет отчества'}, в файле: {c_name or 'нет отчества'})"
+                auto_check = ""
+            else:
+                is_phone_changed = new_phone and db_phone and db_phone != new_phone
+                is_birthday_changed = new_birthday and db_birthday and db_birthday != new_birthday
+
+                if is_phone_changed or is_birthday_changed:
+                    status_type = "conflict"
+                    # ТЕПЕРЬ ТУТ ЧИСТЫЙ ТЕКСТ ДЛЯ ЯЧЕЙКИ ТАБЛИЦЫ, БЕЗ СИСТЕМНОГО МУСОРА
+                    info_msg = "⚠️ Различаются телефон или дата рождения"
+                else:
+                    if (new_phone == db_phone or not new_phone) and (new_birthday == db_birthday or not new_birthday):
+                        continue
+                    status_type = "auto"
+                    info_msg = "✅ Данные будут дополнены"
+
+            enrich_rows.append({
+                "db_id": db_id,
+                "fio": f"{s_name} {db_first_name} {db_curname}".strip(),
+                "file_fio": f"{s_name} {f_name or '[нет имени]'} {c_name}".strip(),
+                "db_phone": db_phone,
+                "new_phone": new_phone if new_phone else db_phone,
+                "db_birthday": db_birthday,
+                "new_birthday": new_birthday if new_birthday else db_birthday,
+                "status_type": status_type,
+                "info_msg": info_msg,
+                "auto_check": auto_check
+            })
+
+    conn.close()
+    return templates.TemplateResponse(request=request, name="enrich_preview.html", context={"rows": enrich_rows, "total_count": len(enrich_rows)})
 
 @app.post("/confirm_import", response_class=HTMLResponse)
 def confirm_import(request: Request, import_indexes: list[int] = Form([])):
