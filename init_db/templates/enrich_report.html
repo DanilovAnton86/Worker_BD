@@ -2,71 +2,35 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <link rel="stylesheet" href="/static/style.css">
     <title>Отчет об обновлении данных</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 40px;
-            background-color: #f4f6f9;
-            color: #333;
-        }
-
-        .report-box {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            max-width: 700px;
-        }
-
-        .log-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-            background: #fafafa;
-            border-radius: 6px;
-            overflow: hidden;
-        }
-
-            .log-table th, .log-table td {
-                padding: 10px 12px;
-                text-align: left;
-                border-bottom: 1px solid #ddd;
-                font-size: 14px;
-            }
-
-            .log-table th {
-                background: #28a745;
-                color: white;
-            }
-
-        button {
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 15px;
-            font-weight: bold;
-        }
-    </style>
 </head>
 <body>
-    <div class="report-box">
-        <h3 style="color: #28a745; margin-top:0;">✅ Данные сотрудников успешно обновлены!</h3>
-        <p>Всего затронуто строк в базе: <strong>{{ success_count }}</strong>.</p>
 
-        <!-- Пункт №4 ТЗ: Если строк больше 10, пишем предупреждение -->
+    <div class="preview-box" style="max-width: 800px;">
+        <h3 style="color: #28a745; margin-top: 0;">✅ Данные сотрудников успешно обновлены!</h3>
+
+        <div class="alert alert-success">
+            Всего затронуто строк в базе: <strong>{{ success_count }}</strong>.
+        </div>
+
+        <!-- Если строк больше 10, пишем предупреждение -->
         {% if hide_details %}
-        <p style="color: #856404; background: #fff3cd; padding: 10px; border-radius: 4px;">⚠️ Затронуто более 10 строк. Подробный лог скрыт во избежание загромождения экрана.</p>
+        <div class="alert alert-warning">
+            ⚠️ Затронуто более 10 строк. Подробный лог скрыт во избежание загромождения экрана.
+        </div>
         {% endif %}
 
         <!-- Блок лога: скрыт по умолчанию только если hide_details=True -->
         <div id="details_block" style="display: {% if hide_details %}none{% else %}block{% endif %}; margin-bottom: 25px;">
-            <h4>Лог изменений карточек:</h4>
-            <table class="log-table">
-                <thead><tr><th>Сотрудник</th><th>Что изменилось</th></tr></thead>
+            <h4 style="margin-top: 0;">Лог изменений карточек:</h4>
+            <table class="table table-success">
+                <thead>
+                    <tr>
+                        <th style="width: 30%;">Сотрудник</th>
+                        <th>Что изменилось</th>
+                    </tr>
+                </thead>
                 <tbody>
                     {% for r in report_list %}
                     <tr>
@@ -80,11 +44,15 @@
 
         <!-- Кнопка-вопрос, если строк больше 10 -->
         {% if hide_details %}
-        <button type="button" id="toggleBtn" onclick="document.getElementById('details_block').style.display='block'; this.style.display='none';" style="margin-bottom: 25px; background-color: #6c757d;">Вы хотите увидеть все изменения?</button>
+        <button type="button" id="toggleBtn" class="btn btn-secondary" style="margin-bottom: 25px;" onclick="document.getElementById('details_block').style.display='block'; this.style.display='none';">
+            Показать все изменения ({{ success_count }})
+        </button>
         {% endif %}
 
-        <br>
-        <button type="button" onclick="window.location.href='/'">Вернуться на главную</button>
+        <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; text-align: right;">
+            <a href="/" class="btn btn-primary">Вернуться на главную</a>
+        </div>
     </div>
+
 </body>
 </html>

@@ -1,0 +1,54 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/static/style.css">
+    <title>Карточка доступов нового сотрудника</title>
+</head>
+<body>
+
+    <div class="preview-box" style="max-width: 600px; margin: 0 auto; border-top: 4px solid #28a745;">
+        <h3 style="color: #28a745; margin-top:0; text-align: center;">🎉 Сотрудник успешно создан!</h3>
+        <p style="text-align: center; color: #666; font-size: 13px; margin-bottom: 25px;">Учётные данные успешно сгенерированы и записаны в базу кадрового учёта.</p>
+
+        <div class="info-row">
+            <label>ФИО сотрудника:</label>
+            <span><strong>{{ second_name }} {{ first_name }} {{ curname }}</strong></span>
+        </div>
+        <div class="info-row">
+            <label>Должность на проекте:</label>
+            <span style="font-weight: bold; color: #007bff;">{{ job_name }}</span> <!-- 🔥 Добавили вывод должности -->
+        </div>
+        <div class="info-row">
+            <label>Локация (Формат):</label>
+            <span>{{ places | join(', ') if places else 'Не указана' }}</span>
+        </div>
+        <div class="info-row">
+            <label>Закрепленные проекты:</label>
+            <span>{{ projects | join(', ') if projects else 'Не привязан' }}</span>
+        </div>
+
+        <div class="info-row highlight-box">
+            <label>Логин Active Directory:</label>
+            <code>{{ login_ad }}</code>
+        </div>
+        <div class="info-row highlight-box" style="border-bottom: 2px solid #ddd;">
+            <label>Общий пароль (AD / Почта):</label>
+            <code style="background: #fff3cd; color: #856404; font-weight: bold;">{{ password }}</code>
+        </div>
+        <div class="info-row">
+            <label>Почта Telescope:</label>
+            <code>{{ login_ad }}@telescope.cc</code>
+        </div>
+        <div class="info-row">
+            <label>Почта Cross:</label>
+            <code>{{ login_ad }}@cross.cc</code>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/" class="btn btn-primary" style="width: 100%; box-sizing: border-box;">Вернуться на главную страницу</a>
+        </div>
+    </div>
+
+</body>
+</html>

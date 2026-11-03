@@ -2,74 +2,8 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <link rel="stylesheet" href="/static/style.css">
     <title>Сверка обновлений данных</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 40px;
-            background-color: #f4f6f9;
-            color: #333;
-        }
-
-        .preview-box {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-
-        .enrich-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            margin-top: 20px;
-        }
-
-            .enrich-table th, .enrich-table td {
-                padding: 12px 15px;
-                text-align: left;
-                border-bottom: 1px solid #e0e0e0;
-            }
-
-            .enrich-table th {
-                background-color: #28a745;
-                color: white;
-                font-weight: bold;
-            }
-
-        /* Стили под ваши ситуации */
-        .row-conflict {
-            background-color: #ffe8cc;
-        }
-        /* Оранжевый — конфликт данных */
-        .row-mismatch {
-            background-color: #e9ecef;
-            color: #6c757d;
-        }
-        /* Серый — не совпали отчества */
-        .row-auto {
-            background-color: #d4edda;
-        }
-        /* Зеленый — чистый апдейт */
-
-        .btn-submit {
-            padding: 12px 24px;
-            background-color: #28a745;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-        }
-
-            .btn-submit:hover {
-                background-color: #218838;
-            }
-    </style>
 </head>
 <body>
 
@@ -79,7 +13,7 @@
         <p>Найдено строк для возможного дообогащения: <strong>{{ total_count }}</strong>.</p>
 
         <form action="/confirm_enrich" method="post">
-            <table class="enrich-table">
+            <table class="table table-success">
                 <thead>
                     <tr>
                         <th style="width: 50px; text-align: center;">Обновить</th>
@@ -115,10 +49,12 @@
                             ДР: {{ row.db_birthday if row.db_birthday else '—' }}
                         </td>
                         <td>
-                            Тел: <strong style="color: #155724;">{{ row.new_phone if row.new_phone else '—' }}</strong><br>
-                            ДР: <strong style="color: #155724;">{{ row.new_birthday if row.new_birthday else '—' }}</strong>
+                            Тел: <span class="text-success">{{ row.new_phone if row.new_phone else '—' }}</span><br>
+                            ДР: <span class="text-success">{{ row.new_birthday if row.new_birthday else '—' }}</span>
                         </td>
-                        <span>{{ row.info_msg }}</span>
+                        <!-- 🔥 ИСПРАВЛЕНО: Добавлен пропущенный тег <td> -->
+                        <td>
+                            {{ row.info_msg }}
                         </td>
                     </tr>
                     {% endfor %}
@@ -126,8 +62,8 @@
             </table>
 
             <div style="margin-top: 30px; text-align: right;">
-                <button type="button" onclick="window.location.href='/'" style="padding: 12px 24px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-right: 10px;">Отмена</button>
-                <button type="submit" class="btn-submit">Применить выбранные обновления</button>
+                <a href="/" class="btn btn-secondary">Отмена</a>
+                <button type="submit" class="btn btn-success">Применить выбранные обновления</button>
             </div>
         </form>
     </div>

@@ -1,0 +1,376 @@
+/* =========================================
+   1. БАЗОВЫЕ СТИЛИ И СБРОС
+   ========================================= */
+body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+    background-color: #f4f6f9;
+    color: #333;
+}
+
+h2, h3, h4 {
+    color: #333;
+}
+
+/* Контейнеры для страниц */
+.preview-box, .search-box {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    margin-bottom: 30px;
+}
+
+.preview-box {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.search-box {
+    max-width: 600px;
+}
+
+/* Утилиты */
+.text-success {
+    color: #155724;
+    font-weight: bold;
+}
+
+.text-muted {
+    color: #666;
+}
+
+.full-width {
+    grid-column: span 2;
+}
+
+/* =========================================
+   2. ФОРМЫ И ИНПУТЫ
+   ========================================= */
+input[type="text"], select, input[type="file"] {
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 16px;
+    box-sizing: border-box;
+}
+
+input[type="text"] {
+    width: 70%;
+}
+
+/* =========================================
+   3. КНОПКИ
+   ========================================= */
+button, .btn {
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    text-decoration: none;
+    display: inline-block;
+    transition: background-color 0.2s ease;
+    text-align: center;
+}
+
+    button:hover, .btn:hover {
+        background-color: #0056b3;
+    }
+
+.btn-primary {
+    background-color: #007bff;
+}
+
+    .btn-primary:hover {
+        background-color: #0056b3;
+    }
+
+.btn-success {
+    background-color: #28a745;
+}
+
+    .btn-success:hover {
+        background-color: #218838;
+    }
+
+.btn-secondary {
+    background-color: #6c757d;
+}
+
+    .btn-secondary:hover {
+        background-color: #5a6268;
+    }
+
+.btn-danger {
+    background-color: #dc3545;
+}
+
+    .btn-danger:hover {
+        background-color: #bd2130;
+    }
+
+/* =========================================
+   4. ТАБЛИЦЫ (Унифицированные)
+   ========================================= */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    margin-top: 20px;
+}
+
+    .table th, .table td {
+        padding: 12px 15px;
+        text-align: left;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .table th {
+        background-color: #e9ecef;
+        color: #495057;
+        font-weight: bold;
+    }
+
+    .table tr:hover {
+        background-color: #f8f9fa;
+    }
+
+/* Модификаторы шапки таблиц */
+.table-primary th {
+    background-color: #007bff;
+    color: white;
+}
+
+.table-success th {
+    background-color: #28a745;
+    color: white;
+}
+
+/* Подсветка строк */
+.duplicate-row {
+    background-color: #fff3cd !important;
+}
+
+.row-conflict {
+    background-color: #ffe8cc !important;
+}
+
+.row-mismatch {
+    background-color: #e9ecef !important;
+    color: #6c757d;
+}
+
+.row-auto {
+    background-color: #d4edda !important;
+}
+
+/* =========================================
+   5. ПЛАШКИ, БЕЙДЖИ И СТАТУСЫ
+   ========================================= */
+.alert {
+    padding: 15px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.alert-warning {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+.alert-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.no-results {
+    background: #fff3cd;
+    color: #856404;
+    padding: 15px;
+    border-radius: 4px;
+}
+
+.badge {
+    background: #e1f5fe;
+    color: #0288d1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-right: 4px;
+    display: inline-block;
+}
+
+.badge-place {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+/* Статусы (Активен, Уволен, Декрет) */
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-1 {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-0 {
+    background-color: #e2e3e5;
+    color: #383d41;
+    text-decoration: line-through;
+}
+
+.status-2 {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+/* =========================================
+   6. ИКОНКИ ДЕЙСТВИЙ (В таблицах)
+   ========================================= */
+.action-icon {
+    cursor: pointer;
+    font-size: 16px;
+    margin: 0 4px;
+    display: inline-block;
+    transition: transform 0.1s ease, color 0.1s ease;
+    user-select: none;
+    opacity: 0.6;
+}
+
+    .action-icon:hover {
+        transform: scale(1.2);
+        opacity: 1;
+    }
+
+.view-icon:hover {
+    color: #007bff;
+}
+
+.edit-icon:hover {
+    color: #ffc107;
+}
+
+.delete-icon:hover {
+    color: #dc3545;
+}
+
+/* =========================================
+   7. МОДАЛЬНЫЕ ОКНА
+   ========================================= */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background: white;
+    padding: 25px;
+    border-radius: 8px;
+    width: 100%;
+    max-width: 600px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    position: relative;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.close-modal {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    font-size: 24px;
+    cursor: pointer;
+    color: #aaa;
+}
+
+    .close-modal:hover {
+        color: #333;
+    }
+
+.modal-footer {
+    margin-top: 25px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* =========================================
+   8. БЛОКИ ИНФОРМАЦИИ (Сетки и строки)
+   ========================================= */
+/* Для модального окна (сетка из 2 колонок) */
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.info-group {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+    border-left: 3px solid #007bff;
+}
+
+    .info-group label {
+        font-size: 12px;
+        color: #666;
+        font-weight: bold;
+        display: block;
+        margin-bottom: 4px;
+    }
+
+    .info-group span, .info-group code {
+        font-size: 15px;
+        word-break: break-all;
+    }
+
+/* Для карточки отчета (строки в столбик) */
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 14px;
+}
+
+    .info-row label {
+        font-weight: bold;
+        color: #555;
+    }
+
+    .info-row span, .info-row code {
+        color: #111;
+    }
+
+.highlight-box {
+    margin-top: 15px;
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+}

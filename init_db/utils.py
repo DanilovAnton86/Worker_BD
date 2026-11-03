@@ -1,5 +1,6 @@
 ﻿import secrets
 import string
+import re
 
 def transliterate(text: str) -> str:
     """Транслитерация кириллицы в латиницу по стандарту ИКАО"""
@@ -16,7 +17,7 @@ def transliterate(text: str) -> str:
     return "".join(result)
 
 def generate_password(length: int = 12) -> str:
-    """Генерация безопасного пароля (минимум 1 заглавная, 1 строчная, 1 цифра)"""
+    """Генерация безопасного пароля"""
     alphabet = string.ascii_letters + string.digits
     while True:
         password = "".join(secrets.choice(alphabet) for _ in range(length))
@@ -25,33 +26,45 @@ def generate_password(length: int = 12) -> str:
             any(c.isdigit() for c in password)):
             return password
 
+def normalize_name(name: str) -> str:
+    """Приводит слово к виду: первая заглавная, остальные строчные. Убирает все лишние пробелы."""
+    if not name:
+        return ""
+    # Убираем любые пробелы (внутри слова тоже, на всякий случай)
+    name = re.sub(r'\s+', '', name.strip())
+    return name.capitalize()
+
+def normalize_login_part(name: str) -> str:
+    """Приводит слово к виду для логина: только латиница, все строчные."""
+    if not name:
+        return ""
+    name = re.sub(r'\s+', '', name.strip())
+    return transliterate(name).lower()
+
 def parse_fio_and_make_login(fio_str: str, f_len: int = 1, c_len: int = 1) -> tuple[str, str, str, str]:
-    """Разбивает ФИО на части и генерирует уникальный латинский логин AD с регулируемыми срезами"""
-    parts = [p.strip() for p in fio_str.split() if p.strip()]
+    """Разбивает ФИО на части и генерирует уникальный латинский логин AD"""
+    # split() без аргументов автоматически обрабатывает множественные пробелы
+    parts = fio_str.split()
     
-    second_name = parts[0].capitalize()
-    first_name = parts[1].capitalize() if len(parts) > 1 else ""
-    curname = parts[2].capitalize() if len(parts) > 2 else ""
+    s_name = normalize_name(parts[0]) if len(parts) > 0 else ""
+    f_name = normalize_name(parts[1]) if len(parts) > 1 else ""
+    c_name = normalize_name(parts[2]) if len(parts) > 2 else ""
     
-    # Переводим в транслит для логина
-    s_trans = transliterate(second_name)
-    f_trans = transliterate(first_name)
-    c_trans = transliterate(curname) if curname else ""
+    s_trans = normalize_login_part(s_name)
+    f_trans = normalize_login_part(f_name)
+    c_trans = normalize_login_part(c_name)
     
-    # Берем срезы букв нужной длины
     f_part = f_trans[:f_len]
     c_part = c_trans[:c_len] if c_trans else ""
     
-    # Собираем логин (i.ivanov или i.i.ivanov)
     if c_part:
         login_ad = f"{f_part}.{c_part}.{s_trans}"
     else:
         login_ad = f"{f_part}.{s_trans}"
         
-    return second_name, first_name, curname, login_ad.lower()
+    return s_name, f_name, c_name, login_ad.lower()
 
 def make_touchpoint_login(login_ad: str, project_name: str) -> str:
-    """Генерирует логин для звонилки TouchPoint на основе проекта"""
     p_upper = project_name.upper()
     if "UNICREDIT" in p_upper:
         return f"{login_ad}_unic"

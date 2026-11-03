@@ -63,10 +63,10 @@
         <!-- ПЛАШКА СЧЁТЧИКА И КНОПКИ ОЧИСТКИ ТАБЛИЦЫ -->
         <div class="counter" style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <div>Всего записей в базе данных: <strong>{{ total_count }}</strong></div>
-            <!-- Кнопка очистки: отображается всегда, сбрасывает таблицу на экране -->
             <button type="button" onclick="clearResultsTable()" style="background-color: #dc3545; padding: 5px 12px; font-size: 13px; height: auto;">Очистить таблицу</button>
         </div>
     </div>
+
     <!-- 2. ТАБЛИЦА РЕЗУЛЬТАТОВ (ВЫВОДИТСЯ НАВЕРХУ) -->
     {% if search_query is defined %}
     <h3>Результаты поиска по запросу "{{ search_query }}"</h3>
@@ -83,7 +83,7 @@
     </div>
     {% endif %}
 
-    <table class="results-table">
+    <table class="table">
         <thead>
             <tr>
                 <th style="width: 80px; text-align: center;">Действия</th>
@@ -92,7 +92,7 @@
                 <th>Логин AD</th>
                 <th>Пароль AD</th>
                 <th>Локация</th>
-                <th>Проекты</th>
+                <th>Проекты (Должность)</th>
             </tr>
         </thead>
         <tbody>
@@ -104,9 +104,8 @@
                     <span class="action-icon delete-icon" onclick="deleteEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">&#10006;</span>
                 </td>
                 <td>
-                    {% if person.status == 1 %}<span class="status-badge status-1">Активен</span>
-                    {% elif person.status == 0 %}<span class="status-badge status-0">Уволен</span>
-                    {% elif person.status == 2 %}<span class="status-badge status-2">Декрет</span>{% endif %}
+                    <!-- 🔥 Выводим статус из связанной таблицы -->
+                    <span class="status-badge status-{{ person.id_status }}">{{ person.status_name or 'Не указан' }}</span>
                 </td>
                 <td><strong>{{ person.second_name }}</strong> {{ person.first_name }} {{ person.curname if person.curname else '' }}</td>
                 <td><code>{{ person.login_ad }}</code></td>
@@ -132,6 +131,7 @@
     <div class="no-results" style="margin-bottom: 20px;">Сотрудники по вашему запросу не найдены.</div>
     {% endif %}
     {% endif %}
+
     <!-- 3. НИЖНИЙ МЕНЕДЖЕР УПРАВЛЕНИЯ (ДОБАВЛЕНИЕ 2/3, ФАЙЛЫ 1/3) -->
     <div style="display: flex; gap: 20px; align-items: stretch; margin-top: 30px; margin-bottom: 40px; width: 100%; box-sizing: border-box;">
 
@@ -142,10 +142,8 @@
                 <input type="hidden" name="current_search" value="{{ search_query if search_query else '' }}">
                 <input type="hidden" id="js_is_confirmed" name="is_lookalike" value="false">
 
-                <!-- Контейнер сетки: делит форму на левую часть (Данные) и правую (Привязки) -->
                 <div style="display: flex; gap: 20px; width: 100%; align-items: flex-start;">
-
-                    <!-- ЛЕВАЯ СТОРОНА: ФИО, ТЕЛЕФОН, ДАТА РОЖДЕНИЯ -->
+                    <!-- ЛЕВАЯ СТОРОНА -->
                     <div style="flex: 1.2; display: flex; flex-direction: column; gap: 12px;">
                         <div>
                             <label style="font-size: 13px; font-weight: bold; color: #555;">ФИО сотрудника (в одну строку):</label>
@@ -161,7 +159,7 @@
                         </div>
                     </div>
 
-                    <!-- ПРАВАЯ СТОРОНА: ЛОКАЦИЯ И ПРОЕКТЫ -->
+                    <!-- ПРАВАЯ СТОРОНА -->
                     <div style="flex: 1; display: flex; flex-direction: column; gap: 12px;">
                         <div>
                             <label style="font-size: 13px; font-weight: bold; color: #555;">Локация:</label>
@@ -170,9 +168,19 @@
                                 <label style="font-size:14px; cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" name="places" value="Дом"> Дом</label>
                             </div>
                         </div>
+                        
+                        <!-- 🔥 ВЫПАДАЮЩИЙ СПИСОК ДОЛЖНОСТЕЙ -->
+                        <div>
+                            <label style="font-size: 13px; font-weight: bold; color: #555;">Должность на проекте (по умолчанию: Оператор):</label>
+                            <select name="job_title_id" style="width: 100%; padding: 10px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px;">
+                                {% for job in job_titles %}
+                                <option value="{{ job.id }}" {% if job.code == 'OP' %}selected{% endif %}>{{ job.name }} ({{ job.code }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
                         <div>
                             <label style="font-size: 13px; font-weight: bold; color: #555;">Проекты (выберите нужные):</label>
-                            <!-- Жестко зафиксировали высоту скролл-бокса, чтобы нижняя линия совпала с левым блоком -->
                             <div style="height: 117px; overflow-y: auto; border: 1px solid #ccc; padding: 6px; margin-top: 4px; border-radius: 4px; background: #fff; box-sizing: border-box;">
                                 {% for project in project_list %}
                                 <label style="display: block; margin-bottom: 4px; font-size: 13px; cursor: pointer;">
@@ -190,8 +198,6 @@
 
         <!-- ПРАВАЯ ЧАСТЬ (1/3 ЭКРАНА): МАССОВЫЕ ФАЙЛОВЫЕ ОПЕРАЦИИ -->
         <div style="flex: 1; display: flex; flex-direction: column; gap: 15px;">
-
-            <!-- Блок: Массовый импорт новичков -->
             <div class="search-box" style="margin-bottom: 0; padding: 15px; background: #ffffff; border: 1px solid #e0e0e0; flex: 1; box-sizing: border-box;">
                 <h3 style="margin-top: 0; font-size: 15px; color: #007bff; border-bottom: 1px solid #eee; padding-bottom: 6px;">Массовый импорт (Excel / TXT)</h3>
                 <form action="/import_file" method="post" enctype="multipart/form-data" id="importForm">
@@ -208,10 +214,10 @@
                         </div>
                     </div>
                     <button type="submit" style="background-color: #007bff; width: 100%; margin-top: 10px; padding: 8px; font-size: 13px; color: white; border: none; border-radius: 4px; cursor: pointer;">Загрузить файл новичков</button>
+                    <p style="font-size: 11px; color: #888; margin-top: 5px;">* При массовом импорте всем сотрудникам по умолчанию выставляется должность <strong>OP (Оператор)</strong>.</p>
                 </form>
             </div>
 
-            <!-- Блок: Дообогащение существующей базы -->
             <div class="search-box" style="margin-bottom: 0; padding: 15px; background: #ffffff; border: 1px solid #e0e0e0; border-left: 4px solid #28a745; flex: 1; box-sizing: border-box;">
                 <h3 style="margin-top: 0; font-size: 15px; color: #28a745; border-bottom: 1px solid #eee; padding-bottom: 6px;">Дообогащение данных</h3>
                 <form action="/enrich_file" method="post" enctype="multipart/form-data">
@@ -219,7 +225,6 @@
                     <button type="submit" style="background-color: #28a745; width: 100%; margin-top: 10px; padding: 8px; font-size: 13px; color: white; border: none; border-radius: 4px; cursor: pointer;">Сверить контакты с БД</button>
                 </form>
             </div>
-
         </div>
     </div>
 
@@ -266,6 +271,17 @@
                         <option value="2">Maternity</option>
                     </select>
                 </div>
+                
+                <!-- 🔥 ВЫПАДАЮЩИЙ СПИСОК ДОЛЖНОСТЕЙ И В РЕДАКТИРОВАНИИ -->
+                <div style="margin-bottom: 15px;">
+                    <label>Должность (применится ко всем выбранным проектам):</label><br>
+                    <select name="job_title_id" id="edit_job_title_id" style="width: 100%; padding: 8px; margin-top: 5px;">
+                        {% for job in job_titles %}
+                        <option value="{{ job.id }}">{{ job.name }} ({{ job.code }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
                 <div style="margin-bottom: 15px;">
                     <label>Телефон:</label><br>
                     <input type="text" name="phone" id="edit_phone" style="width: 96%; padding: 8px; margin-top: 5px;">
@@ -304,10 +320,9 @@
                 const response = await fetch('/employee/' + empld);
                 const data = await response.json();
                 if (data.error) { alert("Ошибка: " + data.error); return; }
-                const statusMap = { 1: "Активен", 0: "Уволен", 2: "Декрет" };
 
                 document.getElementById('m_fio').innerText = data.second_name + " " + data.first_name + " " + (data.curname || "");
-                document.getElementById('m_status').innerText = statusMap[data.status] || data.status;
+                document.getElementById('m_status').innerText = data.status_name || '-'; // 🔥 Берем имя статуса из БД
                 document.getElementById('m_login_ad').innerText = data.login_ad || '-';
                 document.getElementById('m_password_ad').innerText = data.password_ad || '-';
                 document.getElementById('m_phone').innerText = data.phone || '-';
@@ -330,7 +345,8 @@
         }
 
         async function deleteEmployee(empld, fullName, openedModal = null) {
-            if (!confirm("Вы действительно хотите безвозвратно удалить сотрудника " + fullName + " и все его учетные записи?")) return;
+            // 🔥 Меняем текст, так как удаление теперь мягкое (soft delete)
+            if (!confirm("Вы действительно хотите отправить в архив (уволить) сотрудника " + fullName + "?\nЕго данные и связи с проектами будут скрыты, но сохранятся в системе.")) return;
             try {
                 const response = await fetch('/employee/' + empld, { method: 'DELETE' });
                 const data = await response.json();
@@ -338,9 +354,9 @@
                     if (openedModal) openedModal.style.display = 'none';
                     const row = document.getElementById('row-' + empld);
                     if (row) { row.style.transition = "all 0.5s ease"; row.style.opacity = "0"; setTimeout(() => row.remove(), 500); }
-                    alert("Сотрудник " + fullName + " успешно удален");
-                } else { alert("Ошибка при удалении: " + (data.error || "Неизвестная ошибка")); }
-            } catch (err) { console.error(err); alert("Не удалось связаться с сервером для удаления"); }
+                    alert("Сотрудник " + fullName + " перемещен в архив");
+                } else { alert("Ошибка при архивации: " + (data.error || "Неизвестная ошибка")); }
+            } catch (err) { console.error(err); alert("Не удалось связаться с сервером"); }
         }
 
         async function editEmployee(empld) {
@@ -350,11 +366,16 @@
                 const p = data.person;
                 document.getElementById('edit_title').innerText = "Редактирование: " + p.second_name + " " + p.first_name;
                 document.getElementById('editForm').action = '/employee/' + empld + '/update';
-                document.getElementById('edit_status').value = p.status;
+                document.getElementById('edit_status').value = p.id_status; // 🔥 теперь id_status
                 document.getElementById('edit_phone').value = p.phone || "";
                 document.getElementById('edit_current_search').value = document.querySelector('input[name="query"]').value;
                 document.getElementById('chk_place_office').checked = p.selected_places.includes(1);
                 document.getElementById('chk_place_home').checked = p.selected_places.includes(2);
+                
+                // Устанавливаем текущую должность в селект (если есть)
+                if (p.id_job) {
+                    document.getElementById('edit_job_title_id').value = p.id_job;
+                }
 
                 const container = document.getElementById('edit_projects_container');
                 container.innerHTML = "";
@@ -400,7 +421,7 @@
             mainForm.submit();
         }
 
-                function changePage(pageNumber) {
+        function changePage(pageNumber) {
             document.getElementById('currentPageInput').value = pageNumber;
             mainForm.submit();
         }
@@ -422,31 +443,17 @@
         }
 
         function clearResultsTable() {
-            // 1. Очищаем текстовое поле ввода поиска
             document.querySelector('input[name="query"]').value = '';
-
-            // 2. Ищем заголовок результатов поиска и удаляем его
             const resultsTitle = document.querySelector('h3[style*="Результаты поиска"]');
             if (resultsTitle) resultsTitle.remove();
             const resultsTitleAlt = document.querySelector('h3:not([id])');
-            // Дополнительный поиск заголовка, если у него нет специфических стилей
             if (resultsTitleAlt && resultsTitleAlt.innerText.includes('Результаты')) resultsTitleAlt.remove();
-
-            // 3. Удаляем саму таблицу результатов, если она выведена на экран
-            const table = document.querySelector('.results-table');
+            const table = document.querySelector('.table');
             if (table) table.remove();
-
-            // 4. Удаляем оба блока пагинации (верхний и нижний)
             const paginations = document.querySelectorAll('div[style*="justify-content: center"]');
-            paginations.forEach(p => {
-                if (p.innerText.includes('Страница')) p.remove();
-            });
-
-            // 5. Удаляем блок "Сотрудники не найдены", если он горел на экране
+            paginations.forEach(p => { if (p.innerText.includes('Страница')) p.remove(); });
             const noResults = document.querySelector('.no-results');
             if (noResults) noResults.remove();
-
-            // 6. Красивый трюк: меняем URL в браузере на чистый "/", чтобы при обновлении страницы поиск не возвращался
             window.history.pushState({}, document.title, "/");
         }
 
