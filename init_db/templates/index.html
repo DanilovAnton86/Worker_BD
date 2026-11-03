@@ -98,20 +98,25 @@
         <tbody>
             {% for person in results %}
             <tr id="row-{{ person.id }}">
-                <td style="text-align: center; white-space: nowrap;">
+                <!-- ЗАПРЕЩАЕМ ВЫДЕЛЯТЬ ДЕЙСТВИЯ -->
+                <td style="text-align: center; white-space: nowrap; user-select: none;">
                     <span class="action-icon view-icon" onclick="openEmployeeModal({{ person.id }})">&#128065;</span>
                     <span class="action-icon edit-icon" onclick="editEmployee({{ person.id }})">&#9998;</span>
                     <span class="action-icon delete-icon" onclick="deleteEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">&#10006;</span>
                 </td>
-                <td>
-                    <!-- 🔥 Выводим статус из связанной таблицы -->
+                <!-- ЗАПРЕЩАЕМ ВЫДЕЛЯТЬ СТАТУС -->
+                <td style="user-select: none;">
                     <span class="status-badge status-{{ person.id_status }}">{{ person.status_name or 'Не указан' }}</span>
                 </td>
+                
+                <!-- ЭТИ ТРИ КОЛОНКИ БУДУТ ВЫДЕЛЯТЬСЯ ИДЕАЛЬНО -->
                 <td><strong>{{ person.second_name }}</strong> {{ person.first_name }} {{ person.curname if person.curname else '' }}</td>
                 <td><code>{{ person.login_ad }}</code></td>
                 <td><span style="font-family: monospace; background: #eee; padding: 2px 6px; border-radius: 4px;">{{ person.password_ad if person.password_ad else '-' }}</span></td>
-                <td>{% for place in person.places %}<span class="badge badge-place">{{ place }}</span>{% endfor %}</td>
-                <td>{% for project in person.projects %}<span class="badge">{{ project }}</span>{% endfor %}</td>
+                
+                <!-- ЗАПРЕЩАЕМ ВЫДЕЛЯТЬ ЛОКАЦИИ И ПРОЕКТЫ (чтобы не тащить лишние бейджи) -->
+                <td style="user-select: none;">{% for place in person.places %}<span class="badge badge-place">{{ place }}</span>{% endfor %}</td>
+                <td style="user-select: none;">{% for project in person.projects %}<span class="badge">{{ project }}</span>{% endfor %}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -252,6 +257,7 @@
             <div class="modal-footer">
                 <button type="button" id="modalEditBtn" class="btn-modal btn-modal-edit">Редактировать карточку</button>
                 <button type="button" id="modalDeleteBtn" class="btn-modal btn-modal-delete">Удалить сотрудника</button>
+                <button type="button" id="modalHardDeleteBtn" class="btn-modal btn-danger-hard" style="display: none;">Удалить навсегда</button>
             </div>
         </div>
     </div>
@@ -321,8 +327,18 @@
                 const data = await response.json();
                 if (data.error) { alert("Ошибка: " + data.error); return; }
 
+                // 🔥 ПРОВЕРКА КНОПКИ HARD DELETE (Теперь она выполняется ПОСЛЕ получения data)
+                const hardDeleteBtn = document.getElementById('modalHardDeleteBtn');
+                if (data.can_hard_delete) {
+                    hardDeleteBtn.style.display = 'inline-block';
+                    hardDeleteBtn.onclick = function () { hardDeleteEmployee(data.id, data.second_name + " " + data.first_name, modal); };
+                } else {
+                    hardDeleteBtn.style.display = 'none';
+                }
+
+                // Заполняем окно
                 document.getElementById('m_fio').innerText = data.second_name + " " + data.first_name + " " + (data.curname || "");
-                document.getElementById('m_status').innerText = data.status_name || '-'; // 🔥 Берем имя статуса из БД
+                document.getElementById('m_status').innerText = data.status_name || '-';
                 document.getElementById('m_login_ad').innerText = data.login_ad || '-';
                 document.getElementById('m_password_ad').innerText = data.password_ad || '-';
                 document.getElementById('m_phone').innerText = data.phone || '-';
@@ -455,6 +471,20 @@
             const noResults = document.querySelector('.no-results');
             if (noResults) noResults.remove();
             window.history.pushState({}, document.title, "/");
+        }
+
+        async function hardDeleteEmployee(empld, fullName, openedModal = null) {
+            if (!confirm("⚠️ ВНИМАНИЕ! ВЫ ДЕЙСТВИТЕЛЬНО ХОТИТЕ БЕЗВОЗВРАТНО УДАЛИТЬ " + fullName + "?\n\nЭто действие НЕЛЬЗЯ будет отменить.")) return;
+            try {
+                const response = await fetch('/employee/' + empld + '/hard_delete', { method: 'DELETE' });
+                const data = await response.json();
+                if (data.status === "success") {
+                    if (openedModal) openedModal.style.display = 'none';
+                    const row = document.getElementById('row-' + empld);
+                    if (row) row.remove();
+                    alert("Сотрудник " + fullName + " удален навсегда.");
+                } else { alert("Ошибка: " + (data.error || "Неизвестная ошибка")); }
+            } catch (err) { alert("Не удалось связаться с сервером."); }
         }
 
     </script>

@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import pymysql
 from pymysql.cursors import DictCursor
+from utils import clean_birthday
 
 from utils import generate_password, parse_fio_and_make_login, make_touchpoint_login, normalize_name
 from init_db import log_change # Импортируем функцию аудита из вашего файла БД
@@ -150,6 +151,14 @@ def get_employee_details(emp_id: int):
             cursor.execute("SELECT name FROM TouchPoint WHERE id_emp = %s AND is_deleted = 0", (emp_id,))
             person['touchpoints'] = [r['name'] for r in cursor.fetchall()]
             
+            cursor.execute('''
+                SELECT r.can_hard_delete FROM Employee e 
+                JOIN Role r ON e.id_role = r.id 
+                WHERE e.id = %s
+            ''', (CURRENT_USER_ID,))
+            role_res = cursor.fetchone()
+            person['can_hard_delete'] = bool(role_res['can_hard_delete']) if role_res else False
+
             return person
     finally:
         conn.close()
@@ -165,6 +174,27 @@ def delete_employee(emp_id: int):
             # Запись в аудит
             log_change(conn, table_name='Employee', record_id=emp_id, action='SOFT_DELETE', id_emp=CURRENT_USER_ID, 
                        changes=[{"field": "is_deleted", "old": 0, "new": 1}], comment="Пометка об удалении")
+        conn.commit()
+        return {"status": "success"}
+    except Exception as e:
+        conn.rollback()
+        return {"status": "error", "error": str(e)}
+    finally:
+        conn.close()
+
+@app.delete("/employee/{emp_id}/hard_delete")
+def hard_delete_employee(emp_id: int):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Проверяем, имеет ли текущий пользователь право удалять
+            cursor.execute("SELECT r.can_hard_delete FROM Employee e JOIN Role r ON e.id_role = r.id WHERE e.id = %s", (CURRENT_USER_ID,))
+            role = cursor.fetchone()
+            if not role or not role['can_hard_delete']:
+                return {"status": "error", "error": "У вас нет прав на физическое удаление"}
+
+            # Физически удаляем (каскады в БД удалят связи и аудит)
+            cursor.execute("DELETE FROM Employee WHERE id = %s", (emp_id,))
         conn.commit()
         return {"status": "success"}
     except Exception as e:
@@ -216,10 +246,8 @@ def add_user(
                 cleaned_phone = ("+" if has_plus else "") + re.sub(r'\D', '', phone)
                 cleaned_phone = cleaned_phone[:16] if has_plus else cleaned_phone[:15]
                 
-            formatted_birthday = birthday
-            if birthday and '-' in birthday:
-                dp = birthday.split('-')
-                if len(dp) == 3: formatted_birthday = f"{dp[2]}.{dp[1]}.{dp[0]}"
+            from utils import clean_birthday
+            formatted_birthday = clean_birthday(birthday)
                 
             f_len, c_len = 1, 1
             digit_tail = ""
@@ -348,16 +376,7 @@ async def enrich_file(request: Request, file: UploadFile = File(...)):
                     new_phone = ("+" if has_plus else "") + re.sub(r'\D', '', new_phone)
                     new_phone = new_phone[:16] if has_plus else new_phone[:15]
         
-                new_birthday = ""
-                if birthday_col:
-                    raw_bday = str(row.get(birthday_col, '')).strip()
-                    if raw_bday.lower() not in ['nan', 'none', '']:
-                        if ' ' in raw_bday: raw_bday = raw_bday.split()[0]
-                        raw_bday = raw_bday.replace('-', '.').replace(',', '.')
-                        raw_bday = "".join(ch for ch in raw_bday if ch in "0123456789.")
-                        dp = raw_bday.split('.')
-                        if len(dp) == 3 and len(dp[0]) == 4: new_birthday = f"{dp[2]}-{dp[1]}-{dp[0]}" # Для MariaDB нужен формат YYYY-MM-DD
-                        else: new_birthday = raw_bday[:10]
+                new_birthday = clean_birthday(row.get(birthday_col)) if birthday_col else None
         
                 if not new_phone and not new_birthday: continue
         
@@ -516,16 +535,7 @@ async def import_file(
             phone_val = str(row.get('телефон', row.get('phone', ''))).strip()
             phone_val = "" if phone_val.lower() in ['nan', 'none'] else (phone_val[:-2] if phone_val.endswith('.0') else phone_val)
             
-            birthday_val = None
-            if birthday_col:
-                raw_bday = str(row.get(birthday_col, '')).strip()
-                if raw_bday.lower() not in ['nan', 'none', '']:
-                    if ' ' in raw_bday: raw_bday = raw_bday.split()[0]
-                    raw_bday = raw_bday.replace('-', '.').replace(',', '.')
-                    dp = "".join(ch for ch in raw_bday if ch in "0123456789.").split('.')
-                    if len(dp) == 3:
-                        birthday_val = f"{dp[2]}-{dp[1]}-{dp[0]}" if len(dp[0]) == 2 else f"{dp[0]}-{dp[1]}-{dp[2]}"
-
+            birthday_val = clean_birthday(row.get(birthday_col)) if birthday_col else None
             proj_val = str(row.get('проект', row.get('project', ''))).strip()
             place_val = str(row.get('локация', row.get('location', ''))).strip()
             

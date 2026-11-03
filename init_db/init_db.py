@@ -244,19 +244,38 @@ SEED_STATEMENTS = [
     "(1, 'USER',      'Пользователь',      0, 'Обычный сотрудник'), "
     "(2, 'SUPERUSER', 'Суперпользователь', 1, 'Физическое удаление записей')",
 
-    # Должности (теперь с привязкой к AccessLevel)
+    # Статусы (РЕШАЕТ ТЕКУЩУЮ ОШИБКУ)
+    "INSERT IGNORE INTO Status (id, name, description) VALUES "
+    "(1, 'Активен', 'Работает в компании'), "
+    "(2, 'Уволен',  'Уволен или отправился в архив'), "
+    "(3, 'Декрет',  'Декретный отпуск')",
+
+    # Должности
     "INSERT IGNORE INTO JobTitle (id, code, name, id_access_level, is_global) VALUES "
     "(1, 'IT',  'IT-специалист',           4, 1), "
-    "(2, 'ADM', 'Администратор',           4, 1), "
-    "(3, 'RP',  'РП (Project Manager)',    4, 0), "
-    "(4, 'SV',  'СВ (Supervisor)',         3, 0), "
-    "(5, 'TR',  'Тренер',                  3, 0), "
-    "(6, 'ST',  'СТ (Старший специалист)', 3, 0), "
-    "(7, 'OP',  'Оператор',                2, 0), "
-    "(8, 'RKT', 'Рекрутер',                3, 0), "
-    "(9, 'SMM', 'СММ',                     3, 0)"
-]
+    "(2, 'ADM', 'Администратор',           3, 1), "
+    "(3, 'RP',  'РП (Project Manager)',    3, 0), "
+    "(4, 'SV',  'СВ (Supervisor)',         2, 0), "
+    "(5, 'TR',  'Тренер',                  2, 0), "
+    "(6, 'ST',  'СТ (Старший специалист)', 2, 0), "
+    "(7, 'OP',  'Оператор',                1, 0), "
+    "(8, 'RKT', 'Рекрутер',                2, 0), "
+    "(9, 'SMM', 'СММ',                     2, 0)",
 
+    # Базовые локации
+    "INSERT IGNORE INTO Location (id, name) VALUES "
+    "(1, 'Офис'), "
+    "(2, 'Дом')",
+
+    # Базовые проекты (взял из твоего PROJECTS_LIST)
+    "INSERT IGNORE INTO Project (name) VALUES "
+    "('ATL_VTB'), ('CASTORAMA'), ('KOMUS_INVITRO'), ('MOESK'), ('MRG'), "
+    "('MTS'), ('NEOVOX_MTS'), ('OZON'), ('OZON_MP'), ('TELETRIBE_DTSZN'), "
+    "('TELETRIBE_ESSM'), ('TELETRIBE_MT'), ('TELETRIBE_POCHTA'), "
+    "('UNICREDIT_CHAT'), ('UNICREDIT_HL'), ('UNICREDIT_KYC'), "
+    "('VOXYS_AVITO'), ('VOXYS_MOG'), ('VOXYS_RTK_IN'), ('VOXYS_RZD'), "
+    "('VOXYS_TELE2'), ('VOXYS_VTB')"
+]
 def init_database():
     # 1) Сама БД
     conn = get_connection(include_db=False)
