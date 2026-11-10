@@ -33,10 +33,10 @@
                             <!-- Передаем скрытые параметры для обновления -->
                             <input type="hidden" name="db_id_{{ loop.index0 }}" value="{{ row.db_id }}">
                             <input type="hidden" name="fio_{{ loop.index0 }}" value="{{ row.fio }}">
-                            <input type="hidden" name="new_phone_{{ loop.index0 }}" value="{{ row.new_phone }}">
-                            <input type="hidden" name="new_birthday_{{ loop.index0 }}" value="{{ row.new_birthday }}">
-                            <input type="hidden" name="db_phone_{{ loop.index0 }}" value="{{ row.db_phone }}">
-                            <input type="hidden" name="db_birthday_{{ loop.index0 }}" value="{{ row.db_birthday }}">
+                            <input type="hidden" name="new_phone_{{ loop.index0 }}" value="{{ row.new_phone if row.new_phone else '' }}">
+                            <input type="hidden" name="new_birthday_{{ loop.index0 }}" value="{{ row.new_birthday if row.new_birthday else '' }}">
+                            <input type="hidden" name="db_phone_{{ loop.index0 }}" value="{{ row.db_phone if row.db_phone else '' }}">
+                            <input type="hidden" name="db_birthday_{{ loop.index0 }}" value="{{ row.db_birthday if row.db_birthday else '' }}">
                         </td>
                         <td>
                             <strong>{{ row.fio }}</strong>

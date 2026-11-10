@@ -9,10 +9,14 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import pymysql
 from pymysql.cursors import DictCursor
-from utils import clean_birthday
 
-from utils import generate_password, parse_fio_and_make_login, make_touchpoint_login, normalize_name
-from init_db import log_change # Импортируем функцию аудита из вашего файла БД
+# 🔥 ИМПОРТИРУЕМ ВСЕ ФУНКЦИИ ОЧИСТКИ ИЗ UTILS
+from utils import (
+    sanitize_value, clean_birthday, clean_phone_number, 
+    generate_password, parse_fio_and_make_login, make_touchpoint_login, 
+    normalize_name, transliterate
+)
+from init_db import log_change
 
 app = FastAPI(title="Worker Database System")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -28,7 +32,6 @@ PROJECTS_LIST = [
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(CURRENT_DIR, "templates"))
 
-# 🔥 ЦЕНТРАЛИЗОВАННОЕ ПОДКЛЮЧЕНИЕ К MARIADB
 def get_db_connection():
     return pymysql.connect(
         host=os.getenv('DB_HOST', '192.168.10.220'),
@@ -41,7 +44,6 @@ def get_db_connection():
         autocommit=False
     )
 
-# Временный ID "текущего пользователя" для аудита (позже заменим на сессию)
 CURRENT_USER_ID = 1 
 
 def get_all_job_titles():
@@ -53,7 +55,7 @@ def get_all_job_titles():
     finally:
         conn.close()
 
-def search_employees_advanced(query: str, status_filter: str, place_filter: list[str], project_filter: str, page: int, limit_val: str, sort_dir: str = "asc"):
+def search_employees_advanced(query: str, status_filter: str, place_filter: list[str], project_filter: str, date_from: str, date_to: str, page: int, limit_val: str, sort_dir: str = "asc"):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
@@ -95,6 +97,13 @@ def search_employees_advanced(query: str, status_filter: str, place_filter: list
             if status_filter and status_filter != 'all':
                 conditions.append("e.id_status = %s")
                 params.append(int(status_filter))
+                
+            if date_from:
+                conditions.append("e.created_at >= %s")
+                params.append(date_from)
+            if date_to:
+                conditions.append("e.created_at <= %s")
+                params.append(f"{date_to} 23:59:59")
                 
             if conditions:
                 sql_select += " AND " + " AND ".join(conditions)
@@ -168,10 +177,7 @@ def delete_employee(emp_id: int):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Мягкое удаление (Soft Delete)
             cursor.execute("UPDATE Employee SET is_deleted = 1, deleted_at = NOW(), deleted_by = %s WHERE id = %s", (CURRENT_USER_ID, emp_id))
-            
-            # Запись в аудит
             log_change(conn, table_name='Employee', record_id=emp_id, action='SOFT_DELETE', id_emp=CURRENT_USER_ID, 
                        changes=[{"field": "is_deleted", "old": 0, "new": 1}], comment="Пометка об удалении")
         conn.commit()
@@ -187,13 +193,10 @@ def hard_delete_employee(emp_id: int):
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Проверяем, имеет ли текущий пользователь право удалять
             cursor.execute("SELECT r.can_hard_delete FROM Employee e JOIN Role r ON e.id_role = r.id WHERE e.id = %s", (CURRENT_USER_ID,))
             role = cursor.fetchone()
             if not role or not role['can_hard_delete']:
                 return {"status": "error", "error": "У вас нет прав на физическое удаление"}
-
-            # Физически удаляем (каскады в БД удалят связи и аудит)
             cursor.execute("DELETE FROM Employee WHERE id = %s", (emp_id,))
         conn.commit()
         return {"status": "success"}
@@ -209,20 +212,29 @@ def home(request: Request):
         "total_count": get_employee_count(), "results": [], "search_query": "", 
         "status_filter": "all", "place_filter": [], "project_filter": "all", 
         "current_page": 1, "limit": 50, "total_pages": 1, "project_list": PROJECTS_LIST,
-        "job_titles": get_all_job_titles() # 🔥 Передаем должности
+        "job_titles": get_all_job_titles()
     })
 
 @app.get("/search", response_class=HTMLResponse)
-def search(request: Request, query: str = Query(None), status_filter: str = Query("all"), place_filter: list[str] = Query([]), project_filter: str = Query("all"), page: int = Query(1), limit: str = Query("50"), sort_dir: str = Query("asc")):
+def search(request: Request, query: str = Query(None), status_filter: str = Query("all"), 
+           place_filter: list[str] = Query([]), project_filter: str = Query("all"), 
+           date_from: str = Query(None), date_to: str = Query(None), 
+           page: int = Query(1), limit: str = Query("50"), sort_dir: str = Query("asc")):
+    
     search_query_clean = query.strip() if query else ""
-    results, total_found = search_employees_advanced(search_query_clean, status_filter, place_filter, project_filter, page, limit, sort_dir)
+    results, total_found = search_employees_advanced(
+        search_query_clean, status_filter, place_filter, project_filter, 
+        date_from, date_to, page, limit, sort_dir
+    )
     limit_numeric = int(limit) if limit != 'all' else 0
     total_pages = math.ceil(total_found / limit_numeric) if limit_numeric > 0 and total_found > 0 else 1
+    
     return templates.TemplateResponse(request=request, name="index.html", context={
         "total_count": get_employee_count(), "results": results, "search_query": search_query_clean, 
         "status_filter": status_filter, "place_filter": place_filter, "project_filter": project_filter, 
-        "current_page": page, "limit": limit, "total_pages": total_pages, "sort_dir": sort_dir, "project_list": PROJECTS_LIST,
-        "job_titles": get_all_job_titles() # 🔥 Передаем должности
+        "date_from": date_from, "date_to": date_to, 
+        "current_page": page, "limit": limit, "total_pages": total_pages, "sort_dir": sort_dir, 
+        "project_list": PROJECTS_LIST, "job_titles": get_all_job_titles()
     })
 
 @app.post("/add_user")
@@ -240,13 +252,7 @@ def add_user(
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cleaned_phone = ""
-            if phone:
-                has_plus = phone.strip().startswith('+')
-                cleaned_phone = ("+" if has_plus else "") + re.sub(r'\D', '', phone)
-                cleaned_phone = cleaned_phone[:16] if has_plus else cleaned_phone[:15]
-                
-            from utils import clean_birthday
+            cleaned_phone = clean_phone_number(phone)
             formatted_birthday = clean_birthday(birthday)
                 
             f_len, c_len = 1, 1
@@ -266,7 +272,6 @@ def add_user(
                 
                 if not cursor.fetchone(): break
                 
-                from utils import transliterate
                 max_f_len = len(transliterate(first_name))
                 max_c_len = len(transliterate(curname)) if curname else 0
                 
@@ -277,15 +282,12 @@ def add_user(
                         
             shared_password = generate_password()
             
-            # Вставляем сотрудника (по умолчанию id_status=1, id_role=1)
             cursor.execute('''
                 INSERT INTO Employee (first_name, second_name, curname, phone, birthday, login_ad, password_ad, email_telescope, email_cross, password_email, id_status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
             ''', (first_name, second_name, curname, cleaned_phone, formatted_birthday, login_ad, shared_password, email_telescope, email_cross, shared_password))
             
             person_id = cursor.lastrowid
-            
-            # Логируем создание
             log_change(conn, table_name='Employee', record_id=person_id, action='INSERT', id_emp=CURRENT_USER_ID, comment="Создание сотрудника", changes=[])
             
             for place_name in places:
@@ -308,7 +310,6 @@ def add_user(
                     cursor.execute("INSERT INTO Project (name) VALUES (%s)", (proj_name,))
                     proj_id = cursor.lastrowid
                     
-                # Добавляем в проект с должностью OP (id_job = 7)
                 cursor.execute("INSERT IGNORE INTO Project_Employee (id_project, id_emp, id_job) VALUES (%s, %s, %s)", (proj_id, person_id, job_title_id))
                 
                 p_upper = proj_name.upper()
@@ -333,7 +334,7 @@ def add_user(
     return templates.TemplateResponse(request=request, name="add_report.html", context={
         "second_name": second_name, "first_name": first_name, "curname": curname,
         "places": places, "projects": projects, "login_ad": login_ad, "password": shared_password,
-        "job_name": job_name  # 🔥 Передаем название должности
+        "job_name": job_name
     })
 
 @app.post("/enrich_file")
@@ -355,27 +356,20 @@ async def enrich_file(request: Request, file: UploadFile = File(...)):
         with conn.cursor() as cursor:
             for _, row in df.iterrows():
                 if has_split_name:
-                    s_name = normalize_name(str(row.get('фамилия', '')))
-                    f_name = normalize_name(str(row.get('имя', '')))
-                    c_name = normalize_name(str(row.get('отчество', '')))
+                    s_name = normalize_name(row.get('фамилия'))
+                    f_name = normalize_name(row.get('имя'))
+                    c_name = normalize_name(row.get('отчество'))
                 else:
-                    fio_str = str(row.get('фио', '')).strip()
+                    fio_str = sanitize_value(row.get('фио'))
                     fio_parts = fio_str.split()
                     if len(fio_parts) < 1: continue
                     s_name = normalize_name(fio_parts[0])
                     f_name = normalize_name(fio_parts[1]) if len(fio_parts) > 1 else ""
                     c_name = normalize_name(fio_parts[2]) if len(fio_parts) > 2 else ""
         
-                if not s_name or s_name == 'Nan': continue
+                if not s_name: continue
                 
-                new_phone = str(row.get('телефон', row.get('phone', ''))).strip()
-                if new_phone.lower() in ['nan', 'none']: new_phone = ""
-                if new_phone.endswith('.0'): new_phone = new_phone[:-2]
-                if new_phone:
-                    has_plus = new_phone.startswith('+')
-                    new_phone = ("+" if has_plus else "") + re.sub(r'\D', '', new_phone)
-                    new_phone = new_phone[:16] if has_plus else new_phone[:15]
-        
+                new_phone = clean_phone_number(row.get('телефон', row.get('phone')))
                 new_birthday = clean_birthday(row.get(birthday_col)) if birthday_col else None
         
                 if not new_phone and not new_birthday: continue
@@ -393,7 +387,6 @@ async def enrich_file(request: Request, file: UploadFile = File(...)):
                     db_phone = db_user['phone'] or ""
                     db_birthday_raw = db_user['birthday'] or ""
                     
-                    # Приводим дату из базы к строке для сравнения
                     db_birthday = db_birthday_raw.strftime('%Y-%m-%d') if hasattr(db_birthday_raw, 'strftime') else str(db_birthday_raw)
                     
                     status_type, info_msg, auto_check = "normal", "", "checked"
@@ -446,25 +439,25 @@ def confirm_enrich(request: Request, enrich_indexes: list[int] = Form([])):
                     continue
                 db_id = form_data.get(f"db_id_{idx}")
                 fio = form_data.get(f"fio_{idx}")
-                new_phone = form_data.get(f"new_phone_{idx}", "").strip()
-                new_birthday = form_data.get(f"new_birthday_{idx}", "").strip()
-                db_phone = form_data.get(f"db_phone_{idx}", "").strip()
-                db_birthday = form_data.get(f"db_birthday_{idx}", "").strip()
                 
-                # Форматируем дату для MariaDB (YYYY-MM-DD), если она есть
-                db_birthday_val = new_birthday if new_birthday else None
+                # 🔥 БЕЗОПАСНЫЙ ПАРСИНГ ДАННЫХ ИЗ ФОРМЫ
+                new_phone = clean_phone_number(form_data.get(f"new_phone_{idx}"))
+                new_birthday = clean_birthday(form_data.get(f"new_birthday_{idx}"))
                 
-                cursor.execute('UPDATE Employee SET phone = %s, birthday = %s WHERE id = %s', (new_phone, db_birthday_val, db_id))
+                db_phone = sanitize_value(form_data.get(f"db_phone_{idx}"))
+                db_birthday = sanitize_value(form_data.get(f"db_birthday_{idx}"))
+                
+                cursor.execute('UPDATE Employee SET phone = %s, birthday = %s WHERE id = %s', (new_phone, new_birthday, db_id))
                 
                 changes = []
                 if db_phone != new_phone: changes.append({"field": "phone", "old": db_phone, "new": new_phone})
-                if db_birthday != new_birthday: changes.append({"field": "birthday", "old": db_birthday, "new": new_birthday})
+                if db_birthday != (new_birthday or ""): changes.append({"field": "birthday", "old": db_birthday, "new": new_birthday})
                 
                 if changes:
                     log_change(conn, table_name='Employee', record_id=db_id, action='UPDATE', id_emp=CURRENT_USER_ID, changes=changes, comment="Массовое обогащение данных")
                     log_msg = []
                     if db_phone != new_phone: log_msg.append(f"Телефон: {db_phone or '—'} ➔ {new_phone}")
-                    if db_birthday != new_birthday: log_msg.append(f"ДР: {db_birthday or '—'} ➔ {new_birthday}")
+                    if db_birthday != (new_birthday or ""): log_msg.append(f"ДР: {db_birthday or '—'} ➔ {new_birthday or '—'}")
                     report_list.append({"fio": fio, "details": ", ".join(log_msg)})
         conn.commit()
     except Exception as e:
@@ -500,7 +493,7 @@ async def import_file(
                 "second_name": normalize_name(parts[0]),
                 "first_name": normalize_name(parts[1]),
                 "curname": normalize_name(parts[2]) if len(parts) > 2 else "",
-                "phone": "", "birthday": "",
+                "phone": "", "birthday": None,
                 "projects": [default_project] if default_project else [],
                 "places": default_places
             })
@@ -518,29 +511,28 @@ async def import_file(
 
         for _, row in df.iterrows():
             if has_split_name:
-                s_name = normalize_name(str(row.get('фамилия', '')))
-                f_name = normalize_name(str(row.get('имя', '')))
-                c_name = normalize_name(str(row.get('отчество', '')))
+                s_name = normalize_name(row.get('фамилия'))
+                f_name = normalize_name(row.get('имя'))
+                c_name = normalize_name(row.get('отчество'))
             else:
-                fio_str = str(row.get('фио', '')).strip()
+                fio_str = sanitize_value(row.get('фио'))
                 fio_parts = fio_str.split()
                 if len(fio_parts) < 2: continue
                 s_name = normalize_name(fio_parts[0])
                 f_name = normalize_name(fio_parts[1])
                 c_name = normalize_name(fio_parts[2]) if len(fio_parts) > 2 else ""
 
-            if not s_name or not f_name or s_name == 'Nan' or f_name == 'Nan':
+            if not s_name or not f_name:
                 continue
 
-            phone_val = str(row.get('телефон', row.get('phone', ''))).strip()
-            phone_val = "" if phone_val.lower() in ['nan', 'none'] else (phone_val[:-2] if phone_val.endswith('.0') else phone_val)
-            
+            phone_val = clean_phone_number(row.get('телефон', row.get('phone')))
             birthday_val = clean_birthday(row.get(birthday_col)) if birthday_col else None
-            proj_val = str(row.get('проект', row.get('project', ''))).strip()
-            place_val = str(row.get('локация', row.get('location', ''))).strip()
             
-            row_projects = [proj_val] if proj_val and proj_val.lower() != 'nan' else ([default_project] if default_project else [])
-            row_places = ['Дом'] if place_val.upper() in ['УРМ', 'ДОМ'] else (['Офис'] if place_val.upper() == 'ОФИС' else ([place_val] if place_val and place_val.lower() != 'nan' else default_places))
+            proj_val = sanitize_value(row.get('проект', row.get('project')))
+            place_val = sanitize_value(row.get('локация', row.get('location')))
+            
+            row_projects = [proj_val] if proj_val else ([default_project] if default_project else [])
+            row_places = ['Дом'] if place_val.upper() in ['УРМ', 'ДОМ'] else (['Офис'] if place_val.upper() == 'ОФИС' else ([place_val] if place_val else default_places))
 
             parsed_rows.append({
                 "second_name": s_name, "first_name": f_name, "curname": c_name, 
@@ -598,15 +590,16 @@ def confirm_import(request: Request, import_indexes: list[int] = Form([])):
                     ignored_count += 1
                     continue
                     
-                second_name = form_data.get(f"second_name_{idx}", "").strip()
-                first_name = form_data.get(f"first_name_{idx}", "").strip()
-                curname = form_data.get(f"curname_{idx}", "").strip()
-                phone = form_data.get(f"phone_{idx}", "").strip()
-                birthday = form_data.get(f"birthday_{idx}", "").strip()
+                # 🔥 БЕЗОПАСНЫЙ ПАРСИНГ ДАННЫХ ИЗ ФОРМЫ
+                second_name = sanitize_value(form_data.get(f"second_name_{idx}"))
+                first_name = sanitize_value(form_data.get(f"first_name_{idx}"))
+                curname = sanitize_value(form_data.get(f"curname_{idx}"))
+                phone = clean_phone_number(form_data.get(f"phone_{idx}"))
+                birthday = clean_birthday(form_data.get(f"birthday_{idx}"))
+                
                 projects = form_data.getlist(f"projects_{idx}")
                 places = form_data.getlist(f"places{idx}")
                 
-                from utils import transliterate
                 s_name_trans = transliterate(second_name)
                 f_name_trans = transliterate(first_name)
                 c_name_trans = transliterate(curname) if curname else ""
@@ -627,13 +620,11 @@ def confirm_import(request: Request, import_indexes: list[int] = Form([])):
                     else: digit_tail = "1" if not digit_tail else str(int(digit_tail) + 1)
                     
                 shared_password = generate_password()
-                
-                db_birthday = birthday if birthday else None
-                
+
                 cursor.execute('''
                     INSERT INTO Employee (first_name, second_name, curname, phone, birthday, login_ad, password_ad, email_telescope, email_cross, password_email, id_status)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
-                ''', (first_name, second_name, curname, phone, db_birthday, login_ad, shared_password, f"{login_ad}@telescope.cc", f"{login_ad}@cross.cc", shared_password))
+                ''', (first_name, second_name, curname, phone, birthday, login_ad, shared_password, f"{login_ad}@telescope.cc", f"{login_ad}@cross.cc", shared_password))
                 
                 person_id = cursor.lastrowid
                 log_change(conn, table_name='Employee', record_id=person_id, action='INSERT', id_emp=CURRENT_USER_ID, comment="Импорт сотрудника из файла")
@@ -669,11 +660,11 @@ def confirm_import(request: Request, import_indexes: list[int] = Form([])):
                         created_suffixes.add(suffix)
                         
                 success_reports.append({
-                    "fio": f"{second_name} {first_name} {curname}", 
+                    "fio": f"{second_name} {first_name} {curname}".strip(), 
                     "login": login_ad, 
                     "password": shared_password,
-                    "projects_list": projects,  # 🔥 Передаем список проектов
-                    "job_name": "OP (Оператор)"  # 🔥 Указываем должность по умолчанию
+                    "projects_list": projects, 
+                    "job_name": "OP (Оператор)"
                 })
                 
         conn.commit()
@@ -760,7 +751,7 @@ def update_employee(
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            cleaned_phone = re.sub(r'\D', '', phone) if phone else ""
+            cleaned_phone = clean_phone_number(phone)
             
             cursor.execute("SELECT phone, id_status FROM Employee WHERE id = %s", (emp_id,))
             old_data = cursor.fetchone()
@@ -774,7 +765,6 @@ def update_employee(
             if changes:
                 log_change(conn, table_name='Employee', record_id=emp_id, action='UPDATE', id_emp=CURRENT_USER_ID, changes=changes, comment="Ручное редактирование карточки")
             
-            # Локации
             cursor.execute("DELETE FROM Location_Employee WHERE id_emp = %s", (emp_id,))
             for place_name in places:
                 if not place_name: continue
@@ -786,13 +776,10 @@ def update_employee(
                     loc_id = cursor.lastrowid
                 cursor.execute("INSERT IGNORE INTO Location_Employee (id_loc, id_emp) VALUES (%s, %s)", (loc_id, emp_id))
                 
-            # Проекты
             cursor.execute("DELETE FROM Project_Employee WHERE id_emp = %s", (emp_id,))
             for proj_id in projects: 
-                # По умолчанию ставим OP (id=7)
                 cursor.execute("INSERT IGNORE INTO Project_Employee (id_project, id_emp, id_job) VALUES (%s, %s, 7)", (proj_id, emp_id))
                 
-            # Пересчитываем TouchPoint
             cursor.execute("DELETE FROM TouchPoint WHERE id_emp = %s", (emp_id,))
             cursor.execute("SELECT login_ad FROM Employee WHERE id = %s", (emp_id,))
             login_row = cursor.fetchone()

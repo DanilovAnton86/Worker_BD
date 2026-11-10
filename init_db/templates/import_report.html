@@ -31,11 +31,11 @@
             </thead>
             <tbody>
                 {% for user in success_list %}
-                <tr>
+                <tr class="data-row" data-fio="{{ user.fio }}" data-login="{{ user.login }}" data-pass="{{ user.password }}">
                     <td><strong>{{ user.fio }}</strong></td>
                     <td><code>{{ user.login }}</code></td>
                     <td><span style="font-family: monospace; background: #eee; padding: 4px 8px; border-radius: 4px;">{{ user.password }}</span></td>
-                    <td>
+                    <td style="user-select: none;">
                         {% for proj in user.projects_list %}
                         <span class="badge">{{ proj }}</span>
                         {% else %}
@@ -48,10 +48,42 @@
             </tbody>
         </table>
 
-        <div style="margin-top: 30px; text-align: right;">
-            <a href="/" class="btn btn-primary">Вернуться на главную страницу</a>
+        <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <button type="button" class="btn btn-primary" onclick="copyTableData()" style="background-color: #17a2b8; border-color: #17a2b8;">📋 В буфер</button>
+                <button type="button" class="btn btn-success" onclick="downloadTableData()">💾 Скачать TXT</button>
+            </div>
+            <a href="/" class="btn btn-secondary">Вернуться на главную страницу</a>
         </div>
     </div>
+    <script>
+        function copyTableData() {
+            let resultText = "";
+            document.querySelectorAll('.data-row').forEach(row => {
+                resultText += `${row.dataset.fio}\t${row.dataset.login}\t${row.dataset.pass}\n`;
+            });
+            if (!resultText) return alert("Нет данных для копирования");
+            navigator.clipboard.writeText(resultText).then(() => {
+                alert("Данные скопированы в буфер обмена!");
+            }).catch(err => alert("Ошибка копирования: " + err));
+        }
 
+        function downloadTableData() {
+            let resultText = "ФИО\tЛогин AD\tПароль AD\n";
+            document.querySelectorAll('.data-row').forEach(row => {
+                resultText += `${row.dataset.fio}\t${row.dataset.login}\t${row.dataset.pass}\n`;
+            });
+            if (resultText.length < 30) return alert("Нет данных для скачивания");
+            const blob = new Blob([resultText], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'imported_employees.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
 </body>
 </html>

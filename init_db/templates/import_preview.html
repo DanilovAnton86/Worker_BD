@@ -43,9 +43,9 @@
                             <!-- Скрытые поля -->
                             <input type="hidden" name="second_name_{{ loop.index0 }}" value="{{ row.second_name }}">
                             <input type="hidden" name="first_name_{{ loop.index0 }}" value="{{ row.first_name }}">
-                            <input type="hidden" name="curname_{{ loop.index0 }}" value="{{ row.curname }}">
-                            <input type="hidden" name="phone_{{ loop.index0 }}" value="{{ row.phone }}">
-                            <input type="hidden" name="birthday_{{ loop.index0 }}" value="{{ row.birthday }}">
+                            <input type="hidden" name="curname_{{ loop.index0 }}" value="{{ row.curname if row.curname else '' }}">
+                            <input type="hidden" name="phone_{{ loop.index0 }}" value="{{ row.phone if row.phone else '' }}">
+                            <input type="hidden" name="birthday_{{ loop.index0 }}" value="{{ row.birthday if row.birthday else '' }}">
                             
                             {% for proj in row.projects %}
                                 <input type="hidden" name="projects_{{ loop.index0 }}" value="{{ proj }}">
