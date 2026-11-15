@@ -1,0 +1,121 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/static/style.css">
+    <title>История изменений (Аудит)</title>
+</head>
+<body>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2>📜 История изменений (Аудит)</h2>
+        <div>
+            <span style="margin-right: 15px; font-weight: bold; color: #555;">Вы вошли как: {{ current_user.second_name }} {{ current_user.first_name }} ({{ current_user.job_code or 'USER' }})</span>
+            <a href="/" class="btn btn-secondary">На главную</a>
+            <a href="/logout" class="btn btn-danger">Выйти</a>
+        </div>
+    </div>
+
+    <!-- ПАНЕЛЬ ПОИСКА ПО ЛОГАМ (В ДВЕ СТРОКИ) -->
+    <div class="search-box" style="max-width: 100%; box-sizing: border-box; margin-bottom: 20px;">
+        <form action="/logs" method="get" class="search-form">
+
+            <!-- ПЕРВАЯ СТРОКА -->
+            <div class="search-row">
+                <div class="search-group date-group">
+                    <label>Дата (от):</label>
+                    <input type="date" name="date_from" value="{{ date_from if date_from else '' }}">
+                </div>
+                <div class="search-group date-group">
+                    <label>Дата (до):</label>
+                    <input type="date" name="date_to" value="{{ date_to if date_to else '' }}">
+                </div>
+                <div class="search-group" style="flex: 1.5;">
+                    <label>Тип действия:</label>
+                    <select name="action_filter">
+                        <option value="all" {% if action_filter=='all' %}selected{% endif %}>Все действия</option>
+                        <option value="INSERT" {% if action_filter=='INSERT' %}selected{% endif %}>Создание</option>
+                        <option value="UPDATE" {% if action_filter=='UPDATE' %}selected{% endif %}>Изменение</option>
+                        <option value="SOFT_DELETE" {% if action_filter=='SOFT_DELETE' %}selected{% endif %}>Архивация</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- ВТОРАЯ СТРОКА -->
+            <div class="search-row" style="border-top: 1px solid #eee; padding-top: 15px;">
+                <div class="search-group" style="flex: 1.5;">
+                    <label>ФИО пациента:</label>
+                    <input type="text" name="target_fio" placeholder="Чьи данные меняли..." value="{{ target_fio if target_fio else '' }}">
+                </div>
+                <div class="search-group" style="flex: 1.5;">
+                    <label>Кто изменил:</label>
+                    <input type="text" name="changer_fio" placeholder="ФИО исполнителя..." value="{{ changer_fio if changer_fio else '' }}">
+                </div>
+                <div class="search-group" style="flex: 1.5;">
+                    <label>Проект:</label>
+                    <select name="project_filter">
+                        <option value="all" {% if project_filter=='all' %}selected{% endif %}>Все проекты</option>
+                        {% for project in project_list %}
+                        <option value="{{ project }}" {% if project_filter==project %}selected{% endif %}>{{ project }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="search-buttons">
+                    <button type="submit" class="btn btn-primary" style="height: 42px; padding: 0 30px;">Искать</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- ТАБЛИЦА ЛОГОВ -->
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 150px;">Дата и время</th>
+                <th>Кто изменил</th>
+                <th>Действие</th>
+                <th>Пациент (Объект)</th>
+                <th>Проекты</th>
+                <th>Детали изменений</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td style="font-size: 13px; color: #666;">{{ log.changed_at.strftime('%d.%m.%Y %H:%M') if log.changed_at else '' }}</td>
+                <td><strong>{{ log.changer_name }}</strong></td>
+                <td>
+                    {% if log.action == 'INSERT' %}<span class="status-badge status-1">Создание</span>
+                    {% elif log.action == 'UPDATE' %}<span class="status-badge status-2" style="background:#fff3cd; color:#856404;">Изменение</span>
+                    {% elif log.action == 'SOFT_DELETE' %}<span class="status-badge status-0">Архив</span>
+                    {% elif log.action == 'RESTORE' %}<span class="status-badge status-1" style="background-color: #d4edda; color: #155724;">Восстановлен</span>
+                    {% else %}{{ log.action }}{% endif %}
+                </td>
+                <td>
+                    {{ log.target_name or '—' }}
+                    {% if log.comment %}<br><small style="color: #888;">({{ log.comment }})</small>{% endif %}
+                </td>
+                <td><small>{{ log.projects or '—' }}</small></td>
+                <td><span style="font-size: 13px; font-family: monospace; color: #0056b3;">{{ log.changes_formatted }}</span></td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 20px;">Логи по вашему запросу не найдены.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Простая пагинация (можно улучшить) -->
+    <div style="margin-top: 20px; display: flex; justify-content: center; gap: 10px;">
+        {% if page > 1 %}
+        <a href="/logs?page={{ page - 1 }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&target_fio={{ target_fio or '' }}&changer_fio={{ changer_fio or '' }}&project_filter={{ project_filter }}" class="btn btn-secondary">Назад</a>
+        {% endif %}
+        <span style="padding: 10px;">Страница {{ page }}</span>
+        {% if logs|length == 50 %}
+        <a href="/logs?page={{ page + 1 }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&target_fio={{ target_fio or '' }}&changer_fio={{ changer_fio or '' }}&project_filter={{ project_filter }}" class="btn btn-secondary">Вперед</a>
+        {% endif %}
+    </div>
+
+</body>
+</html>

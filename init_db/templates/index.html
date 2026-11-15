@@ -6,34 +6,42 @@
     <title>Система поиска сотрудников</title>
 </head>
 <body>
-
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div></div> <!-- Пустой блок для отступа -->
+        <div>
+            <span style="margin-right: 15px; font-weight: bold; color: #555;">Вы вошли как: {{ current_user.second_name }} {{ current_user.first_name }}</span>
+            
+            <!-- 🔥 Кнопка логов показывается только IT и Суперюзерам -->
+            {% if current_user.id_global_job == 1 or current_user.id_role == 2 %}
+                <a href="/logs" class="btn btn-primary" style="background-color: #6f42c1; border-color: #6f42c1; margin-right: 10px;">📜 Логи</a>
+            {% endif %}
+            
+            <a href="/logout" class="btn btn-danger">Выйти</a>
+        </div>
+    </div>
     <h2>Учётные записи сотрудников OP_DB</h2>
 
-    <!-- 1. ПАНЕЛЬ ПОИСКА И ФИЛЬТРОВ НА ВСЮ ШИРИНУ -->
+    <!-- 1. ПАНЕЛЬ ПОИСКА И ФИЛЬТРОВ -->
     <div class="search-box" style="max-width: 100%; box-sizing: border-box; background: #ffffff; border: 1px solid #e0e0e0; margin-bottom: 20px;">
-        <form action="/search" method="get" id="mainSearchForm" style="display: flex; flex-direction: column; gap: 15px;">
-            
-            <!-- ПЕРВАЯ СТРОКА -->
-            <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
-                <div style="flex: 2; min-width: 200px;">
-                    <label style="font-weight: bold; font-size: 13px; color: #555;">Поиск сотрудника:</label>
-                    <input type="text" name="query" placeholder="Введите фамилию или логин AD..." value="{{ search_query if search_query else '' }}" style="width: 100%; box-sizing: border-box; padding: 10px; margin-top: 5px;">
+        <form action="/search" method="get" id="mainSearchForm" class="search-form">
+            <div class="search-row">
+                <div class="search-group" style="grid-column: span 2;">
+                    <label>Поиск сотрудника:</label>
+                    <input type="text" name="query" placeholder="Введите фамилию или логин AD..." value="{{ search_query if search_query else '' }}">
                 </div>
-
-                <div style="flex: 1; min-width: 130px;">
-                    <label style="font-weight: bold; font-size: 13px; color: #555;">Статус:</label>
-                    <select name="status_filter" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;" onchange="document.getElementById('mainSearchForm').submit()">
-                        <option value="all" {% if status_filter=='all' or not status_filter %}selected{% endif %}>Все статусы</option>
+                <div class="search-group">
+                    <label>Статус:</label>
+                    <select name="status_filter" onchange="document.getElementById('mainSearchForm').submit()">
+                        <option value="all" {% if status_filter=='all' %}selected{% endif %}>Все</option>
                         <option value="1" {% if status_filter=='1' %}selected{% endif %}>Активен</option>
-                        <option value="0" {% if status_filter=='0' %}selected{% endif %}>Уволен</option>
-                        <option value="2" {% if status_filter=='2' %}selected{% endif %}>Декрет</option>
+                        <option value="2" {% if status_filter=='2' %}selected{% endif %}>Уволен</option>
+                        <option value="3" {% if status_filter=='3' %}selected{% endif %}>Декрет</option>
                     </select>
                 </div>
-
-                <div style="flex: 1.5; min-width: 160px;">
-                    <label style="font-weight: bold; font-size: 13px; color: #555;">Проект:</label>
-                    <select name="project_filter" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;" onchange="document.getElementById('mainSearchForm').submit()">
-                        <option value="all" {% if project_filter=='all' or not project_filter %}selected{% endif %}>Все проекты</option>
+                <div class="search-group">
+                    <label>Проект:</label>
+                    <select name="project_filter" onchange="document.getElementById('mainSearchForm').submit()">
+                        <option value="all" {% if project_filter=='all' %}selected{% endif %}>Все</option>
                         {% for project in project_list %}
                         <option value="{{ project }}" {% if project_filter==project %}selected{% endif %}>{{ project }}</option>
                         {% endfor %}
@@ -41,52 +49,54 @@
                 </div>
             </div>
 
-            <!-- ВТОРАЯ СТРОКА -->
-            <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end; border-top: 1px solid #eee; padding-top: 15px;">
-                
-                <div style="flex: 1; min-width: 150px; background: #f8f9fa; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; height: 40px; display: flex; align-items: center; gap: 8px;">
-                    <label style="font-weight: bold; font-size: 13px; color: #555; margin-right: 2px;">Локация:</label>
-                    <label style="cursor:pointer; font-size: 13px;"><input type="checkbox" name="place_filter" value="Офис" {% if 'Офис' in place_filter %}checked{% endif %} onchange="document.getElementById('mainSearchForm').submit()"> Офис</label>
-                    <label style="cursor:pointer; font-size: 13px;"><input type="checkbox" name="place_filter" value="Дом" {% if 'Дом' in place_filter %}checked{% endif %} onchange="document.getElementById('mainSearchForm').submit()"> Дом</label>
+            <div class="search-row" style="border-top: 1px solid #eee; padding-top: 15px;">
+                <div class="search-group">
+                    <label>Дата (от):</label>
+                    <input type="date" name="date_from" value="{{ date_from if date_from else '' }}">
                 </div>
-
-                <div style="display: flex; gap: 10px; flex: 1.5; min-width: 280px;">
-                    <div style="flex: 1;">
-                        <label style="font-weight: bold; font-size: 13px; color: #555;">Дата добавления (от):</label>
-                        <input type="date" name="date_from" value="{{ date_from if date_from else '' }}" style="width: 100%; padding: 9px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;">
-                    </div>
-                    <div style="flex: 1;">
-                        <label style="font-weight: bold; font-size: 13px; color: #555;">до:</label>
-                        <input type="date" name="date_to" value="{{ date_to if date_to else '' }}" style="width: 100%; padding: 9px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;">
+                <div class="search-group">
+                    <label>Дата (до):</label>
+                    <input type="date" name="date_to" value="{{ date_to if date_to else '' }}">
+                </div>
+                <div class="search-group">
+                    <label>Локация:</label>
+                    <div class="search-group-checkbox">
+                        <label><input type="checkbox" name="place_filter" value="Офис" {% if 'Офис' in place_filter %}checked{% endif %}> Офис</label>
+                        <label><input type="checkbox" name="place_filter" value="Дом" {% if 'Дом' in place_filter %}checked{% endif %}> Дом</label>
                     </div>
                 </div>
-
-                <div style="width: 100px;">
-                    <label style="font-weight: bold; font-size: 13px; color: #555;">Строк:</label>
-                    <select name="limit" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;" onchange="document.getElementById('mainSearchForm').submit()">
+                {% if current_user.effective_job_code in ['IT', 'ADM'] or current_user.id_role == 2 %}
+                <div class="search-group">
+                    <label>Архив:</label>
+                    <div class="search-group-checkbox" style="background: #ffeeba; border-color: #ffdf7e;">
+                        <label><input type="checkbox" name="show_archived" value="true" {% if show_archived %}checked{% endif %} onchange="document.getElementById('mainSearchForm').submit()"> Показать удаленных</label>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="search-group">
+                    <label>Строк:</label>
+                    <select name="limit">
                         <option value="50" {% if limit==50 %}selected{% endif %}>50</option>
                         <option value="100" {% if limit==100 %}selected{% endif %}>100</option>
-                        <option value="all" {% if limit=='all' or limit==0 %}selected{% endif %}>Все</option>
+                        <option value="all" {% if limit=='all' %}selected{% endif %}>Все</option>
                     </select>
                 </div>
-
-                <div style="display: flex; gap: 8px; margin-left: auto;">
-                    <button type="submit" style="height: 40px; padding: 0 20px;">Найти</button>
-                    <button type="button" onclick="showAllEmployees()" style="height: 40px; padding: 0 15px; background-color: #6c757d;">Показать всех</button>
+                <div class="search-actions">
+                    <button type="submit" class="btn btn-primary">Найти</button>
+                    <button type="button" onclick="showAllEmployees()" class="btn btn-secondary">Сброс</button>
                 </div>
             </div>
-
-            <input type="hidden" name="page" id="currentPageInput" value="{{ current_page if current_page else 1 }}">
-        </form>        
+        </form>
+        
         <!-- ПЛАШКА СЧЁТЧИКА И КНОПКИ ЭКСПОРТА -->
         <div class="counter" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 12px; display: flex; justify-content: space-between; align-items: center; width: 100%;">
-            <div>Всего записей в базе данных: <strong>{{ total_count }}</strong></div>
+            <div>Всего записей в базе: <strong>{{ total_count }}</strong></div>
             <div style="display: flex; gap: 10px;">
                 {% if results %}
-                <button type="button" onclick="copyTableData()" style="background-color: #17a2b8; padding: 5px 12px; font-size: 13px; height: auto;">📋 Скопировать данные</button>
-                <button type="button" onclick="downloadTableData()" style="background-color: #28a745; padding: 5px 12px; font-size: 13px; height: auto;">💾 Скачать TXT</button>
+                <button type="button" onclick="copyTableData()" class="btn" style="background-color: #17a2b8; padding: 5px 12px; font-size: 13px;">📋 Скопировать</button>
+                <button type="button" onclick="downloadTableData()" class="btn btn-success" style="padding: 5px 12px; font-size: 13px;">💾 Скачать TXT</button>
                 {% endif %}
-                <button type="button" onclick="clearResultsTable()" style="background-color: #dc3545; padding: 5px 12px; font-size: 13px; height: auto;">Очистить таблицу</button>
+                <button type="button" onclick="clearResultsTable()" class="btn btn-danger" style="padding: 5px 12px; font-size: 13px;">Очистить таблицу</button>
             </div>
         </div>
     </div>
@@ -128,8 +138,19 @@
                 <!-- ЗАПРЕЩАЕМ ВЫДЕЛЯТЬ ДЕЙСТВИЯ -->
                 <td style="text-align: center; white-space: nowrap; user-select: none;">
                     <span class="action-icon view-icon" onclick="openEmployeeModal({{ person.id }})">&#128065;</span>
-                    <span class="action-icon edit-icon" onclick="editEmployee({{ person.id }})">&#9998;</span>
-                    <span class="action-icon delete-icon" onclick="deleteEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">&#10006;</span>
+                    
+                    {% if person.is_deleted == 1 %}
+                        <!-- Если запись в архиве, показываем кнопку восстановления (только для IT/ADM) -->
+                        {% if current_user.effective_job_code in ['IT', 'ADM'] or current_user.id_role == 2 %}
+                        <span class="action-icon" style="color: #28a745;" title="Восстановить" onclick="restoreEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">♻️</span>
+                        {% endif %}
+                    {% else %}
+                        <!-- Если запись активна, показываем редактирование и удаление -->
+                        {% if person.can_edit %}
+                            <span class="action-icon edit-icon" onclick="editEmployee({{ person.id }})">&#9998;</span>
+                            <span class="action-icon delete-icon" onclick="deleteEmployee({{ person.id }}, '{{ person.second_name }} {{ person.first_name }}')">&#10006;</span>
+                        {% endif %}
+                    {% endif %}
                 </td>
                 <!-- ЗАПРЕЩАЕМ ВЫДЕЛЯТЬ СТАТУС -->
                 <td style="user-select: none;">
@@ -250,7 +271,7 @@
                 </form>
             </div>
 
-            <div class="search-box" style="margin-bottom: 0; padding: 15px; background: #ffffff; border: 1px solid #e0e0e0; border-left: 4px solid #28a745; flex: 1; box-sizing: border-box;">
+            <div class="search-box" style="margin-bottom: 0; padding: 15px; background: #ffffff; border: 1px solid #e0e0e0; flex: 1; box-sizing: border-box;">
                 <h3 style="margin-top: 0; font-size: 15px; color: #28a745; border-bottom: 1px solid #eee; padding-bottom: 6px;">Дообогащение данных</h3>
                 <form action="/enrich_file" method="post" enctype="multipart/form-data">
                     <input type="file" name="file" accept=".xlsx" style="width: 100%; font-size: 13px;" required>
@@ -282,11 +303,10 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" id="modalEditBtn" class="btn-modal btn-modal-edit">Редактировать карточку</button>
-                <button type="button" id="modalDeleteBtn" class="btn-modal btn-modal-delete">Удалить сотрудника</button>
+                <button type="button" id="modalEditBtn" class="btn-modal btn-modal-edit" style="display: none;">Редактировать карточку</button>
+                <button type="button" id="modalDeleteBtn" class="btn-modal btn-modal-delete" style="display: none;">Удалить сотрудника</button>
                 <button type="button" id="modalHardDeleteBtn" class="btn-modal btn-danger-hard" style="display: none;">Удалить навсегда</button>
-            </div>
-        </div>
+            </div>        </div>
     </div>
 
     <!-- МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ -->
@@ -298,7 +318,7 @@
                 <input type="hidden" name="current_search" id="edit_current_search" value="">
                 <div style="margin-bottom: 15px;">
                     <label>Статус сотрудника: </label><br>
-                    <select name="status" id="edit_status" style="width: 100%; padding: 8px; margin-top: 5px;">
+                    <select name="status_id" id="edit_status" style="width: 100%; padding: 8px; margin-top: 5px;">
                         <option value="1">Active</option>
                         <option value="0">Fired</option>
                         <option value="2">Maternity</option>
@@ -306,15 +326,6 @@
                 </div>
                 
                 <!-- 🔥 ВЫПАДАЮЩИЙ СПИСОК ДОЛЖНОСТЕЙ И В РЕДАКТИРОВАНИИ -->
-                <div style="margin-bottom: 15px;">
-                    <label>Должность (применится ко всем выбранным проектам):</label><br>
-                    <select name="job_title_id" id="edit_job_title_id" style="width: 100%; padding: 8px; margin-top: 5px;">
-                        {% for job in job_titles %}
-                        <option value="{{ job.id }}">{{ job.name }} ({{ job.code }})</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
                 <div style="margin-bottom: 15px;">
                     <label>Телефон:</label><br>
                     <input type="text" name="phone" id="edit_phone" style="width: 96%; padding: 8px; margin-top: 5px;">
@@ -325,8 +336,8 @@
                     <label style="margin-left: 15px;"><input type="checkbox" name="places" value="Дом" id="chk_place_home"> Дом</label>
                 </div>
                 <div style="margin-bottom: 15px;">
-                    <label>Проекты (отметьте нужные): </label><br>
-                    <div id="edit_projects_container" style="max-height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 5px; border-radius: 4px;"></div>
+                    <label>Проекты и должности: </label><br>
+                    <div id="edit_projects_container" style="max-height: 250px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin-top: 5px; border-radius: 4px; background: #f8f9fa;"></div>
                 </div>
                 <div style="text-align: right; margin-top: 20px;">
                     <button type="submit" class="btn-modal" style="background-color: #28a745; color: white;">Сохранить изменения</button>
@@ -352,18 +363,49 @@
             try {
                 const response = await fetch('/employee/' + empld);
                 const data = await response.json();
+                
                 if (data.error) { alert("Ошибка: " + data.error); return; }
 
-                // 🔥 ПРОВЕРКА КНОПКИ HARD DELETE (Теперь она выполняется ПОСЛЕ получения data)
+                // Получаем ссылки на все кнопки один раз
+                const editBtn = document.getElementById('modalEditBtn');
+                const deleteBtn = document.getElementById('modalDeleteBtn');
                 const hardDeleteBtn = document.getElementById('modalHardDeleteBtn');
-                if (data.can_hard_delete) {
-                    hardDeleteBtn.style.display = 'inline-block';
-                    hardDeleteBtn.onclick = function () { hardDeleteEmployee(data.id, data.second_name + " " + data.first_name, modal); };
+
+                // 🔥 ЛОГИКА ДЛЯ АРХИВНЫХ ЗАПИСЕЙ
+                if (data.is_deleted == 1) {
+                    if (editBtn) editBtn.style.display = 'none';
+                    if (deleteBtn) deleteBtn.style.display = 'none';
                 } else {
-                    hardDeleteBtn.style.display = 'none';
+                    // ЛОГИКА ДЛЯ АКТИВНЫХ ЗАПИСЕЙ
+                    if (editBtn) {
+                        if (data.can_edit) {
+                            editBtn.style.display = 'inline-block';
+                            editBtn.onclick = function () { modal.style.display = 'none'; editEmployee(data.id); };
+                        } else {
+                            editBtn.style.display = 'none';
+                        }
+                    }
+                    if (deleteBtn) {
+                        if (data.can_edit) {
+                            deleteBtn.style.display = 'inline-block';
+                            deleteBtn.onclick = function () { deleteEmployee(data.id, data.second_name + " " + data.first_name, modal); };
+                        } else {
+                            deleteBtn.style.display = 'none';
+                        }
+                    }
                 }
 
-                // Заполняем окно
+                // 🔥 ЛОГИКА ДЛЯ HARD DELETE (физического удаления)
+                if (hardDeleteBtn) {
+                    if (data.can_hard_delete) {
+                        hardDeleteBtn.style.display = 'inline-block';
+                        hardDeleteBtn.onclick = function () { hardDeleteEmployee(data.id, data.second_name + " " + data.first_name, modal); };
+                    } else {
+                        hardDeleteBtn.style.display = 'none';
+                    }
+                }
+
+                // Заполняем окно данными
                 document.getElementById('m_fio').innerText = data.second_name + " " + data.first_name + " " + (data.curname || "");
                 document.getElementById('m_status').innerText = data.status_name || '-';
                 document.getElementById('m_login_ad').innerText = data.login_ad || '-';
@@ -377,12 +419,12 @@
                 document.getElementById('m_password_email').innerText = data.password_email || '-';
                 document.getElementById('m_touchpoints').innerText = data.touchpoints.length ? data.touchpoints.join('\n') : ' Нет аккаунтов звонилки';
 
-                document.getElementById('modalEditBtn').onclick = function () { modal.style.display = 'none'; editEmployee(data.id); };
-                document.getElementById('modalDeleteBtn').onclick = function () { deleteEmployee(data.id, data.second_name + " " + data.first_name, modal); };
                 modal.style.display = 'flex';
-            } catch (err) { console.error(err); alert("Не удалось загрузить данные сотрудника"); }
+            } catch (err) { 
+                console.error(err); 
+                alert("Не удалось загрузить данные сотрудника"); 
+            }
         }
-
         function closeEmployeeModal(event) {
             if (event.target === document.getElementById('employeeModal')) { document.getElementById('employeeModal').style.display = 'none'; }
         }
@@ -406,29 +448,51 @@
             try {
                 const response = await fetch('/employee/' + empld + '/edit_data');
                 const data = await response.json();
+                if (data.error) { alert(data.error); return; }
+                
                 const p = data.person;
                 document.getElementById('edit_title').innerText = "Редактирование: " + p.second_name + " " + p.first_name;
                 document.getElementById('editForm').action = '/employee/' + empld + '/update';
-                document.getElementById('edit_status').value = p.id_status; // 🔥 теперь id_status
+                document.getElementById('edit_status').value = p.id_status;
                 document.getElementById('edit_phone').value = p.phone || "";
                 document.getElementById('edit_current_search').value = document.querySelector('input[name="query"]').value;
                 document.getElementById('chk_place_office').checked = p.selected_places.includes(1);
                 document.getElementById('chk_place_home').checked = p.selected_places.includes(2);
-                
-                // Устанавливаем текущую должность в селект (если есть)
-                if (p.id_job) {
-                    document.getElementById('edit_job_title_id').value = p.id_job;
-                }
 
                 const container = document.getElementById('edit_projects_container');
                 container.innerHTML = "";
+                
+                // Рисуем список всех проектов с выпадашками должностей
                 data.all_projects.forEach(proj => {
-                    const isChecked = p.selected_projects.includes(proj.id) ? 'checked' : '';
-                    const label = document.createElement('label');
-                    label.style.display = 'block';
-                    label.style.marginBottom = '5px';
-                    label.innerHTML = '<input type="checkbox" name="projects" value="' + proj.id + '" ' + isChecked + '> ' + proj.name;
-                    container.appendChild(label);
+                    // Если должность есть, берем её, иначе ищем ОП
+                    let currentJobId = p.project_jobs[proj.id] || null;
+                    if (!currentJobId) {
+                        const opJob = data.all_jobs.find(j => j.code === 'OP');
+                        if (opJob) currentJobId = opJob.id;
+                    }
+                    
+                    const isChecked = p.project_jobs[proj.id] ? 'checked' : '';
+                    
+                    let optionsHtml = '';
+                    data.all_jobs.forEach(job => {
+                        const selected = (job.id == currentJobId) ? 'selected' : '';
+                        optionsHtml += `<option value="${job.id}" ${selected}>${job.name} (${job.code})</option>`;
+                    });
+
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.marginBottom = '8px';
+                    row.style.gap = '10px';
+                    
+                    row.innerHTML = `
+                        <input type="checkbox" name="selected_projects" value="${proj.id}" ${isChecked} id="chk_proj_${proj.id}" style="width: 18px; height: 18px;">
+                        <label for="chk_proj_${proj.id}" style="flex: 1; cursor: pointer; font-weight: bold;">${proj.name}</label>
+                        <select name="job_for_project_${proj.id}" style="width: 180px; padding: 5px;">
+                            ${optionsHtml}
+                        </select>
+                    `;
+                    container.appendChild(row);
                 });
                 document.getElementById('editModal').style.display = 'flex';
             } catch (err) { console.error(err); alert("Не удалось загрузить форму редактирования"); }
@@ -470,9 +534,10 @@
         }
 
         function showAllEmployees() {
-            document.querySelector('input[name="query"]').value = '';
+            const form = document.getElementById('mainSearchForm');
+            form.reset(); // 🔥 Сбрасывает ВСЕ поля (даты, проекты, локации) в значения по умолчанию
             document.getElementById('currentPageInput').value = 1;
-            mainForm.submit();
+            form.submit();
         }
 
         function toggleImportOptions() {
@@ -541,7 +606,17 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
-
+                async function restoreEmployee(empld, fullName) {
+            if (!confirm("Вы действительно хотите восстановить сотрудника " + fullName + " из архива?")) return;
+            try {
+                const response = await fetch('/employee/' + empld + '/restore', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === "success") {
+                    alert("Сотрудник " + fullName + " восстановлен!");
+                    location.reload(); // Перезагружаем страницу, чтобы он исчез из архива
+                } else { alert("Ошибка: " + (data.error || "Неизвестная ошибка")); }
+            } catch (err) { console.error(err); alert("Не удалось связаться с сервером"); }
+        }
     </script>
 </body>
 </html>

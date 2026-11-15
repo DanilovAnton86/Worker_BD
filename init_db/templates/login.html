@@ -1,0 +1,25 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/static/style.css">
+    <title>Вход в систему</title>
+</head>
+<body class="login-body">
+
+    <div class="login-card">
+        <h2>Управление доступом</h2>
+
+        {% if error %}
+        <div class="login-error">{{ error }}</div>
+        {% endif %}
+
+        <form action="/login" method="post">
+            <input type="text" name="login_ad" class="login-input" placeholder="Логин AD" required autofocus>
+            <input type="password" name="password_ad" class="login-input" placeholder="Пароль" required>
+            <button type="submit" class="login-btn">Войти</button>
+        </form>
+    </div>
+
+</body>
+</html>
