@@ -1,26 +1,14 @@
-﻿import os
+﻿"""Создание базы данных и её таблиц.
+
+Все настройки подключения берутся из config.ini через модули config_loader
+и db. Здесь остались структура таблиц, начальные справочники
+и вспомогательная функция записи в журнал изменений.
+"""
+
 import json
-import pymysql
 
-# ---------------------------------------------------------------
-# Конфигурация подключения
-# ---------------------------------------------------------------
-DB_CONFIG = {
-    'host':     os.getenv('DB_HOST', '192.168.10.220'),
-    'port':     int(os.getenv('DB_PORT', '3308')),
-    'user':     os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', '2nsfa@423FdsC0fHvL'),
-    'database': os.getenv('DB_NAME', 'MariaDB_to_test_Anton'),
-    'charset':  'utf8mb4',
-    'cursorclass': pymysql.cursors.DictCursor,
-    'autocommit': False,
-}
-
-def get_connection(include_db: bool = True):
-    cfg = DB_CONFIG.copy()
-    if not include_db:
-        cfg.pop('database', None)
-    return pymysql.connect(**cfg)
+from config_loader import SECTION_DATABASE, load_config
+from db import get_connection, quote_identifier
 
 # ---------------------------------------------------------------
 # DDL
@@ -276,38 +264,51 @@ SEED_STATEMENTS = [
     "('VOXYS_AVITO'), ('VOXYS_MOG'), ('VOXYS_RTK_IN'), ('VOXYS_RZD'), "
     "('VOXYS_TELE2'), ('VOXYS_VTB')"
 ]
-def init_database():
-    # 1) Сама БД
-    conn = get_connection(include_db=False)
+def init_database(config=None) -> None:
+    """Создаёт базу, все таблицы и заполняет справочники.
+
+    Повторный запуск безопасен: CREATE TABLE IF NOT EXISTS и INSERT IGNORE
+    не удаляют уже существующие данные.
+    """
+    settings = config if config is not None else load_config()
+    database_name = settings[SECTION_DATABASE]["name"]
+    safe_name = quote_identifier(database_name)
+
+    # 1) Сама база данных. Подключиться к ней можно только после создания.
+    server_connection = get_connection(include_db=False, config=settings)
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"CREATE DATABASE IF NOT EXISTS `{DB_CONFIG['database']}` "
+        with server_connection.cursor() as cursor:
+            cursor.execute(
+                f"CREATE DATABASE IF NOT EXISTS {safe_name} "
                 "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
             )
-        conn.commit()
+        server_connection.commit()
     finally:
-        conn.close()
+        server_connection.close()
 
-    # 2) Таблицы + справочники
-    conn = get_connection()
+    # 2) Таблицы и начальные значения (должности, проекты, статусы).
+    connection = get_connection(config=settings)
     try:
-        with conn.cursor() as cur:
-            for ddl in DDL_STATEMENTS:
-                cur.execute(ddl)
-            for seed in SEED_STATEMENTS:
-                cur.execute(seed)
-        conn.commit()
+        with connection.cursor() as cursor:
+            for statement in DDL_STATEMENTS:
+                cursor.execute(statement)
+            for statement in SEED_STATEMENTS:
+                cursor.execute(statement)
+        connection.commit()
     finally:
-        conn.close()
+        connection.close()
 
-    print("ALL Correct!")
+    print(f"Готово: база «{database_name}» и все таблицы созданы.")
 
 # ---------------------------------------------------------------
 # Хелпер аудита
 # ---------------------------------------------------------------
 def log_change(conn, *, table_name, record_id, action, id_emp,
                changes=None, comment=None, emp_snapshot=None):
+    """Записывает в журнал: кто, когда и что изменил.
+
+    Параметр changes — список пар «поле / было / стало». Он сохраняется в JSON.
+    """
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO AuditLog "
@@ -320,5 +321,9 @@ def log_change(conn, *, table_name, record_id, action, id_emp,
             ),
         )
 
-if __name__ == '__main__':
-    init_database()
+if __name__ == "__main__":
+    import sys
+
+    from operations import run_action
+
+    sys.exit(0 if run_action("Создание базы данных", init_database) else 1)

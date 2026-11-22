@@ -1,0 +1,29 @@
+# Локальные настройки с паролями не должны попадать в общий архив кода
+config.ini
+
+# Служебные файлы Python
+__pycache__/
+*.py[cod]
+
+# Старые базы и служебные файлы Excel
+*.db
+~$*.xlsx
+
+# Отчёты, которые создают скрипты
+report_*.txt
+README_IMPORT.txt
+unmapped_users.txt
+
+# Файлы, которые появляются во время работы программы
+install.state.json
+web_server.pid
+.*.lock
+logs/
+backups/
+*.log
+
+# Файлы личной среды разработки
+.vs/
+.vscode/
+*.pyproj.user
+init_db.sln

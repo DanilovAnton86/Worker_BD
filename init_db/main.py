@@ -1,61 +1,85 @@
-﻿import os
+﻿"""Веб-часть системы учёта сотрудников.
+
+Страницы, поиск, карточки и загрузка файлов находятся здесь. Подключение к базе
+берётся из config.ini и db.py, права — из access.py. В коде нет паролей
+и IP-адресов.
+"""
+
 import io
-import math
 import json
-import pandas as pd
-import pymysql
-from pymysql.cursors import DictCursor
-from fastapi import FastAPI, Request, UploadFile, File, Form, Query, Depends, HTTPException, status
+import math
+import os
+from typing import Any
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from utils import (
-    sanitize_value, clean_birthday, clean_phone_number, 
-    generate_password, parse_fio_and_make_login, make_touchpoint_login, 
-    normalize_name, transliterate
+from access import (
+    VIEW_LEVELS,
+    allowed_job_codes,
+    can_edit as access_can_edit,
+    can_view as access_can_view,
+    get_allowed_jobs,
+    get_allowed_projects,
+    get_all_job_codes,
 )
+from config_loader import SECTION_WEB, load_config
+from db import get_connection
 from init_db import log_change
+from utils import (
+    clean_birthday,
+    clean_phone_number,
+    generate_password,
+    make_touchpoint_login,
+    normalize_name,
+    parse_fio_and_make_login,
+    read_excel_quietly,
+    sanitize_value,
+    transliterate,
+)
 
-# ==========================================
-# 1. НАСТРОЙКИ И ПОДКЛЮЧЕНИЕ
-# ==========================================
-app = FastAPI(title="Worker Database System")
-app.add_middleware(SessionMiddleware, secret_key="super-secret-key-12345")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Настройки читаются один раз при запуске сервера.
+APP_CONFIG = load_config()
+WEB_CONFIG = APP_CONFIG[SECTION_WEB]
 
-PROJECTS_LIST = [
- "ATL_VTB", "CASTORAMA", "KOMUS_INVITRO", "MOESK", "MRG", "MTS", 
- "NEOVOX_MTS", "OZON", "OZON_MP", "TELETRIBE_DTSZN", "TELETRIBE_ESSM", 
- "TELETRIBE_MT", "TELETRIBE_POCHTA", "UNICREDIT_CHAT", "UNICREDIT_HL", 
- "UNICREDIT_KYC", "VOXYS_AVITO", "VOXYS_MOG", "VOXYS_RTK_IN", 
- "VOXYS_RZD", "VOXYS_TELE2", "VOXYS_VTB"
-]
-
+# Все пути считаются от папки с main.py, а не от текущей папки консоли.
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+app = FastAPI(title="Worker Database System")
+app.add_middleware(SessionMiddleware, secret_key=WEB_CONFIG["secret_key"])
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(CURRENT_DIR, "static")),
+    name="static",
+)
+
 templates = Jinja2Templates(directory=os.path.join(CURRENT_DIR, "templates"))
 
-def get_db_connection():
-    return pymysql.connect(
-        host=os.getenv('DB_HOST', '192.168.10.220'),
-        port=int(os.getenv('DB_PORT', '3308')),
-        user=os.getenv('DB_USER', 'root'),
-        password=os.getenv('DB_PASSWORD', '2nsfa@423FdsC0fHvL'),
-        database=os.getenv('DB_NAME', 'MariaDB_to_test_Anton'),
-        charset='utf8mb4',
-        cursorclass=DictCursor,
-        autocommit=False
-    )
+
+def get_project_names() -> list[str]:
+    """Берём список проектов из базы, чтобы он не расходился со справочником."""
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT name FROM Project WHERE is_deleted = 0 ORDER BY name"
+            )
+            return [row["name"] for row in cursor.fetchall()]
+    finally:
+        connection.close()
 
 # ==========================================
 # 2. АВТОРИЗАЦИЯ И СЕССИИ
 # ==========================================
 
 def get_current_user(request: Request):
+    """Находит сотрудника по номеру в сессии и определяет его уровень доступа."""
     user_id = request.session.get("user_id")
     if not user_id: return None
-    conn = get_db_connection()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
@@ -84,13 +108,15 @@ def get_current_user(request: Request):
         conn.close()
 
 def require_login(request: Request):
+    """Пускает дальше только вошедших пользователей."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
     return user
 
 def get_all_job_titles():
-    conn = get_db_connection()
+    """Все должности из справочника для выпадающих списков."""
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("SELECT id, code, name FROM JobTitle ORDER BY id ASC")
@@ -99,107 +125,49 @@ def get_all_job_titles():
         conn.close()
 
 def get_job_id_by_code(cursor, code="OP"):
+    """Возвращает номер должности по её короткому коду (например, OP)."""
     cursor.execute("SELECT id FROM JobTitle WHERE code = %s LIMIT 1", (code,))
     res = cursor.fetchone()
     return res['id'] if res else 7 
 
 # ==========================================
-# 3. ЛОГИКА ПРАВ ДОСТУПА (ИЕРАРХИЯ)
+# 3. ПРОВЕРКА ПРАВ
 # ==========================================
+# Сами правила живут в access.py. Здесь оставлены тонкие обёртки, чтобы
+# остальной код не менялся и не дублировал иерархию.
 
-def can_view_employee(cursor, current_user, target_emp_id):
-    if current_user['id_role'] == 2: return True
-    my_job = current_user['effective_job_code']
-    if my_job in ['IT']: return True
+def can_view_employee(cursor, current_user, target_emp_id) -> bool:
+    """Можно ли открыть карточку сотрудника."""
+    return access_can_view(cursor, current_user, target_emp_id)
 
-    # Убрали AND e.is_deleted = 0, чтобы IT мог смотреть карточки удаленных
-    cursor.execute("""
-        SELECT e.id, jt.code as global_job, GROUP_CONCAT(DISTINCT pe.id_project) as projects,
-               GROUP_CONCAT(DISTINCT jt_p.code) as project_jobs
-        FROM Employee e
-        LEFT JOIN JobTitle jt ON e.id_global_job = jt.id
-        LEFT JOIN Project_Employee pe ON e.id = pe.id_emp AND pe.is_deleted = 0
-        LEFT JOIN JobTitle jt_p ON pe.id_job = jt_p.id
-        WHERE e.id = %s
-        GROUP BY e.id
-    """, (target_emp_id,))
-    target = cursor.fetchone()
-    if not target: return False
 
-    t_global_job = target['global_job']
-    t_project_jobs = set(target['project_jobs'].split(',')) if target['project_jobs'] else set()
-    t_projects = set(target['projects'].split(',')) if target['projects'] else set()
-    
-    if t_global_job: t_project_jobs.add(t_global_job)
-    if not t_project_jobs: t_project_jobs = {'OP'}
+def can_edit_employee(cursor, current_user, target_emp_id) -> bool:
+    """Можно ли менять карточку сотрудника."""
+    return access_can_edit(cursor, current_user, target_emp_id)
 
-    if my_job == 'ADM':
-        if 'ADM' in t_project_jobs or 'IT' in t_project_jobs: return False
-        return True
 
-    if my_job in ['RKT', 'SMM']:
-        return t_project_jobs == {'OP'}
+def require_editor(user, *, mass_operation: bool = False) -> None:
+    """Пускает к добавлению/загрузке только тех, кому это разрешено.
 
-    cursor.execute("SELECT id_project FROM Project_Employee WHERE id_emp = %s AND is_deleted = 0", (current_user['id'],))
-    my_projects = set(str(r['id_project']) for r in cursor.fetchall())
-    
-    if not my_projects and current_user['global_job_code']: return False
-    has_shared_project = bool(my_projects.intersection(t_projects))
-    
-    # ЖЕСТКАЯ ИЕРАРХИЯ (свой уровень не видит свой уровень)
-    if my_job == 'ST':
-        allowed_targets = {'OP'}
-    elif my_job == 'TR':
-        allowed_targets = {'OP', 'ST'}
-    elif my_job == 'SV':
-        allowed_targets = {'OP', 'ST', 'TR'}
-    elif my_job == 'RP':
-        allowed_targets = {'OP', 'ST', 'TR', 'SV'}
-    else:
-        return False
-        
-    return has_shared_project and t_project_jobs.issubset(allowed_targets)
-
-def can_edit_employee(cursor, current_user, target_emp_id):
-    if current_user['id_role'] == 2: return True
-    my_job = current_user['effective_job_code']
-    if my_job == 'IT': return True
-
-    cursor.execute("""
-        SELECT GROUP_CONCAT(DISTINCT pe.id_project) as projects,
-               GROUP_CONCAT(DISTINCT jt_p.code) as project_jobs
-        FROM Employee e
-        LEFT JOIN Project_Employee pe ON e.id = pe.id_emp AND pe.is_deleted = 0
-        LEFT JOIN JobTitle jt_p ON pe.id_job = jt_p.id
-        WHERE e.id = %s
-        GROUP BY e.id
-    """, (target_emp_id,))
-    target = cursor.fetchone()
-    if not target: return False
-    
-    t_project_jobs = set(target['project_jobs'].split(',')) if target['project_jobs'] else {'OP'}
-    t_projects = set(target['projects'].split(',')) if target['projects'] else set()
-
-    if my_job == 'ADM':
-        return 'ADM' not in t_project_jobs and 'IT' not in t_project_jobs
-
-    # ЖЕСТКАЯ ИЕРАРХИЯ РЕДАКТИРОВАНИЯ
-    if my_job == 'SV':
-        allowed_targets = {'OP', 'ST', 'TR'}
-    elif my_job == 'RP':
-        allowed_targets = {'OP', 'ST', 'TR', 'SV'}
-    else:
-        return False
-
-    cursor.execute("SELECT id_project FROM Project_Employee WHERE id_emp = %s AND is_deleted = 0", (current_user['id'],))
-    my_projects = set(str(r['id_project']) for r in cursor.fetchall())
-    return bool(my_projects.intersection(t_projects)) and t_project_jobs.issubset(allowed_targets)
+    Массовые операции (загрузка файлов) доступны IT, администратору
+    и суперпользователю. Обычное добавление — ещё и СВ/РП.
+    """
+    job_code = user["effective_job_code"]
+    permitted = job_code in ("IT", "ADM") or user["id_role"] == 2
+    if not mass_operation:
+        permitted = permitted or job_code in ("SV", "RP")
+    if not permitted:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="У вас нет прав на это действие",
+        )
 
 # ==========================================
 # 4. ХЕЛПЕРЫ ДЛЯ РАБОТЫ С ДАННЫМИ
 # ==========================================
 
 def get_or_create_location(cursor, place_name: str) -> int:
+    """Находит локацию в справочнике или создаёт её, если её ещё нет."""
     if not place_name: return None
     cursor.execute("SELECT id FROM Location WHERE name = %s", (place_name,))
     res = cursor.fetchone()
@@ -208,6 +176,7 @@ def get_or_create_location(cursor, place_name: str) -> int:
     return cursor.lastrowid
 
 def sync_employee_projects(cursor, person_id: int, projects: list, job_title_id: int, login_ad: str):
+    """Привязывает нового сотрудника к проектам и создаёт входы в звонилку."""
     created_suffixes = set()
     for proj_item in projects:
         if not proj_item: continue
@@ -238,6 +207,7 @@ def sync_employee_projects(cursor, person_id: int, projects: list, job_title_id:
             created_suffixes.add(suffix)
 
 def generate_unique_login(cursor, fio_str: str) -> tuple:
+    """Составляет логин из ФИО и добавляет цифру, если логин уже занят."""
     f_len, c_len = 1, 1
     digit_tail = ""
     while True:
@@ -262,12 +232,14 @@ def generate_unique_login(cursor, fio_str: str) -> tuple:
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
+    """Показывает форму входа."""
     if request.session.get("user_id"): return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse(request=request, name="login.html", context={"error": None})
 
 @app.post("/login", response_class=HTMLResponse)
 def login_post(request: Request, login_ad: str = Form(...), password_ad: str = Form(...)):
-    conn = get_db_connection()
+    """Проверяет логин и пароль. Операторы на сайт не допускаются."""
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
@@ -303,6 +275,7 @@ def login_post(request: Request, login_ad: str = Form(...), password_ad: str = F
 
 @app.get("/logout")
 def logout(request: Request):
+    """Завершает работу: очищает данные о вошедшем пользователе."""
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
@@ -316,11 +289,11 @@ def view_logs(request: Request, user=Depends(require_login),
               target_fio: str = Query(None), changer_fio: str = Query(None),
               project_filter: str = Query("all"), action_filter: str = Query("all"),
               page: int = Query(1)):
-
+    """Показывает журнал изменений с фильтрами и постранично."""
     if user['effective_job_code'] not in ['IT', 'ADM'] and user['id_role'] != 2:
         return HTMLResponse("<h3>У вас нет прав на просмотр логов. Обратитесь к IT.</h3>", status_code=403)
 
-    conn = get_db_connection()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             sql = """
@@ -371,7 +344,8 @@ def view_logs(request: Request, user=Depends(require_login),
                     try:
                         changes_list = json.loads(log['changes'])
                         log['changes_formatted'] = ", ".join([f"{c['field']}: {c['old']} ➔ {c['new']}" for c in changes_list])
-                    except:
+                    except (TypeError, ValueError, KeyError):
+                        # Если в журнале лежит старый формат, покажем его как есть.
                         log['changes_formatted'] = log['changes']
                 else:
                     log['changes_formatted'] = ""
@@ -384,15 +358,31 @@ def view_logs(request: Request, user=Depends(require_login),
         "date_from": date_from, "date_to": date_to,
         "target_fio": target_fio, "changer_fio": changer_fio,
         "project_filter": project_filter, "action_filter": action_filter,
-        "project_list": PROJECTS_LIST, "page": page
+        "project_list": get_project_names(), "page": page
     })
 
 # ==========================================
 # 7. ПОИСК И ГЛАВНАЯ
 # ==========================================
 
-def search_employees_advanced(current_user, query: str, status_filter: str, place_filter: list[str], project_filter: str, date_from: str, date_to: str, page: int, limit_val: str, sort_dir: str = "asc", show_archived: bool = False):
-    conn = get_db_connection()
+def search_employees_advanced(
+    current_user,
+    query: str,
+    status_filter: str,
+    place_filter: list[str],
+    project_filter: str,
+    date_from: str,
+    date_to: str,
+    page: int,
+    limit_val: str,
+    sort_dir: str = "asc",
+    show_archived: bool = False,
+):
+    """Ищет сотрудников с учётом прав, фильтров и страницы.
+
+    Возвращает (список людей, сколько всего нашлось, номер текущей страницы).
+    """
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             sql_select = """
@@ -408,62 +398,90 @@ def search_employees_advanced(current_user, query: str, status_filter: str, plac
                 LEFT JOIN Project p ON pe.id_project = p.id AND p.is_deleted = 0
                 LEFT JOIN JobTitle jt ON pe.id_job = jt.id
             """
-            params = []
-            my_job = current_user['effective_job_code']
-            my_id = current_user['id']
+            params: list[Any] = []
+            my_job = current_user["effective_job_code"]
+            my_id = current_user["id"]
 
-            # ФИЛЬТР АРХИВА
-            if show_archived and (my_job in ['IT', 'ADM'] or current_user['id_role'] == 2):
+            # Архив показываем только тем, кому это разрешено.
+            if show_archived and (my_job in ("IT", "ADM") or current_user["id_role"] == 2):
                 sql_select += " WHERE e.is_deleted = 1"
             else:
                 sql_select += " WHERE e.is_deleted = 0"
 
-            # ФИЛЬТР ПРАВ
-            if current_user['id_role'] != 2 and my_job not in ['IT']:
-                if my_job == 'ADM':
-                    sql_select += " AND e.id_global_job NOT IN (SELECT id FROM JobTitle WHERE code IN ('ADM', 'IT'))"
-                elif my_job in ['RKT', 'SMM']:
-                    sql_select += """ AND EXISTS (
-                        SELECT 1 FROM Project_Employee pe2 JOIN JobTitle jt2 ON pe2.id_job = jt2.id 
-                        WHERE pe2.id_emp = e.id AND jt2.code = 'OP'
-                    ) AND e.id_global_job IS NULL"""
-                elif my_job in ['ST', 'TR', 'SV', 'RP']:
-                    if my_job == 'RP':
-                        allowed = "('OP', 'ST', 'TR', 'SV')"
-                    elif my_job == 'SV':
-                        allowed = "('OP', 'ST', 'TR')"
-                    elif my_job == 'TR':
-                        allowed = "('OP', 'ST')"
-                    else: # ST
-                        allowed = "('OP')"
-                        
-                    sql_select += f""" AND EXISTS (
-                        SELECT 1 FROM Project_Employee pe_my 
-                        JOIN Project_Employee pe_t ON pe_my.id_project = pe_t.id_project
-                        JOIN JobTitle jt_t ON pe_t.id_job = jt_t.id
-                        WHERE pe_my.id_emp = %s AND pe_t.id_emp = e.id AND jt_t.code IN {allowed}
-                    ) AND e.id_global_job IS NULL"""
+            # Ограничение видимости. Правила берём из access.py, а здесь только
+            # превращаем их в условие запроса к базе.
+            if current_user["id_role"] != 2 and my_job != "IT":
+                if my_job == "ADM":
+                    # IS NULL обязателен: обычные сотрудники не имеют глобальной должности.
+                    sql_select += """
+                        AND (e.id_global_job IS NULL OR e.id_global_job NOT IN (
+                            SELECT id FROM JobTitle WHERE code IN ('ADM', 'IT')
+                        ))
+                        AND NOT EXISTS (
+                            SELECT 1 FROM Project_Employee pe_x
+                            JOIN JobTitle jt_x ON jt_x.id = pe_x.id_job
+                            WHERE pe_x.id_emp = e.id AND pe_x.is_deleted = 0
+                              AND jt_x.code IN ('ADM', 'IT')
+                        )
+                    """
+                elif my_job in VIEW_LEVELS:
+                    allowed_codes = sorted(VIEW_LEVELS[my_job])
+                    placeholders = ", ".join(["%s"] * len(allowed_codes))
+                    sql_select += f"""
+                        AND e.id_global_job IS NULL
+                        AND EXISTS (
+                            SELECT 1 FROM Project_Employee pe_my
+                            JOIN Project_Employee pe_t ON pe_my.id_project = pe_t.id_project
+                            JOIN JobTitle jt_t ON jt_t.id = pe_t.id_job
+                            WHERE pe_my.id_emp = %s AND pe_my.is_deleted = 0
+                              AND pe_t.id_emp = e.id AND pe_t.is_deleted = 0
+                              AND jt_t.code IN ({placeholders})
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1 FROM Project_Employee pe_bad
+                            JOIN JobTitle jt_bad ON jt_bad.id = pe_bad.id_job
+                            WHERE pe_bad.id_emp = e.id AND pe_bad.is_deleted = 0
+                              AND jt_bad.code NOT IN ({placeholders})
+                        )
+                    """
                     params.append(my_id)
+                    params.extend(allowed_codes)
+                    params.extend(allowed_codes)
                 else:
-                    return [], 0
+                    return [], 0, 1
 
             conditions = []
             if place_filter:
                 extended_places = list(place_filter)
-                if 'Дом' in place_filter and 'УРМ' not in extended_places: extended_places.append('УРМ')
-                if 'УРМ' in place_filter and 'Дом' not in extended_places: extended_places.append('Дом')
-                place_conds = " OR ".join(["loc.name = %s" for _ in extended_places])
-                conditions.append(f"({place_conds})")
+                # Дом и УРМ в базе могут обозначать одно и то же место.
+                if "Дом" in place_filter and "УРМ" not in extended_places:
+                    extended_places.append("УРМ")
+                if "УРМ" in place_filter and "Дом" not in extended_places:
+                    extended_places.append("Дом")
+                place_conds = " OR ".join(["loc_f.name = %s" for _ in extended_places])
+                # EXISTS не сужает список проектов и локаций в строке результата.
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM Location_Employee le_f "
+                    "JOIN Location loc_f ON loc_f.id = le_f.id_loc "
+                    f"WHERE le_f.id_emp = e.id AND le_f.is_deleted = 0 AND ({place_conds}))"
+                )
                 params.extend(extended_places)
-                
-            if project_filter and project_filter != 'all':
-                conditions.append("p.name = %s")
+
+            if project_filter and project_filter != "all":
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM Project_Employee pe_f "
+                    "JOIN Project p_f ON p_f.id = pe_f.id_project "
+                    "WHERE pe_f.id_emp = e.id AND pe_f.is_deleted = 0 AND p_f.name = %s)"
+                )
                 params.append(project_filter)
-                
+
             if query:
                 query_clean = query.strip().lower()
-                conditions.append("(LOWER(e.second_name) LIKE %s OR LOWER(e.login_ad) LIKE %s)")
-                params.extend([f"%{query_clean}%", f"%{query_clean}%"])
+                conditions.append(
+                    "(LOWER(e.second_name) LIKE %s OR LOWER(e.first_name) LIKE %s "
+                    "OR LOWER(IFNULL(e.curname, '')) LIKE %s OR LOWER(e.login_ad) LIKE %s)"
+                )
+                params.extend([f"%{query_clean}%"] * 4)
                 
             if status_filter and status_filter != 'all':
                 conditions.append("e.id_status = %s")
@@ -481,33 +499,50 @@ def search_employees_advanced(current_user, query: str, status_filter: str, plac
                 
             count_query = f"SELECT COUNT(*) as cnt FROM ({sql_select} GROUP BY e.id) as subquery"
             cursor.execute(count_query, tuple(params))
-            total_found = cursor.fetchone()['cnt']
-            
+            total_found = cursor.fetchone()["cnt"]
+
+            # Если запрошена страница дальше последней, показываем последнюю.
+            limit_number = int(limit_val) if limit_val and limit_val != "all" else 0
+            total_pages = (
+                math.ceil(total_found / limit_number)
+                if limit_number > 0 and total_found > 0
+                else 1
+            )
+            page = max(1, min(page, total_pages))
+
             direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
             sql_select += f" GROUP BY e.id ORDER BY e.second_name {direction}, e.first_name {direction}"
-            
-            if limit_val and limit_val != 'all':
-                limit = int(limit_val)
+
+            if limit_number:
                 sql_select += " LIMIT %s OFFSET %s"
-                params.extend([limit, (page - 1) * limit])
-                
+                params.extend([limit_number, (page - 1) * limit_number])
+
             cursor.execute(sql_select, tuple(params))
             raw_persons = cursor.fetchall()
-            
+
             persons = []
-            for p in raw_persons:
-                p['places'] = p['group_places'].split(', ') if p['group_places'] else []
-                p['projects'] = p['group_projects'].split(', ') if p['group_projects'] else []
-                p['can_edit'] = can_edit_employee(cursor, current_user, p['id'])
-                persons.append(p)
-                
-            return persons, total_found
+            for person in raw_persons:
+                person["places"] = (
+                    person["group_places"].split(", ") if person["group_places"] else []
+                )
+                person["projects"] = (
+                    person["group_projects"].split(", ")
+                    if person["group_projects"]
+                    else []
+                )
+                person["can_edit"] = can_edit_employee(
+                    cursor, current_user, person["id"]
+                )
+                persons.append(person)
+
+            return persons, total_found, page
     finally:
         conn.close()
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, user=Depends(require_login)):
-    conn = get_db_connection()
+    """Главная страница: пустая таблица с фильтрами."""
+    conn = get_connection()
     total_count = 0
     try:
         with conn.cursor() as cursor:
@@ -517,9 +552,11 @@ def home(request: Request, user=Depends(require_login)):
         conn.close()
         
     return templates.TemplateResponse(request=request, name="index.html", context={
-        "total_count": total_count, "results": [], "search_query": "", 
-        "status_filter": "all", "place_filter": [], "project_filter": "all", 
-        "current_page": 1, "limit": 50, "total_pages": 1, "project_list": PROJECTS_LIST,
+        "total_count": total_count, "results": [], "search_query": "",
+        "status_filter": "all", "place_filter": [], "project_filter": "all",
+        "date_from": "", "date_to": "", "sort_dir": "asc",
+        "current_page": 1, "limit": "50", "total_pages": 1,
+        "project_list": get_project_names(),
         "job_titles": get_all_job_titles(), "current_user": user, "show_archived": False
     })
 
@@ -530,19 +567,23 @@ def search(request: Request, user=Depends(require_login),
            date_from: str = Query(None), date_to: str = Query(None), 
            page: int = Query(1), limit: str = Query("50"), sort_dir: str = Query("asc"),
            show_archived: str = Query("false")):
-    
+    """Отдаёт найденных сотрудников и номера страниц для таблицы."""
     search_query_clean = query.strip() if query else ""
     is_archived_view = (show_archived == "true")
     
-    results, total_found = search_employees_advanced(
-        user, search_query_clean, status_filter, place_filter, project_filter, 
+    results, total_found, page = search_employees_advanced(
+        user, search_query_clean, status_filter, place_filter, project_filter,
         date_from, date_to, page, limit, sort_dir, is_archived_view
     )
-    
-    limit_numeric = int(limit) if limit != 'all' else 0
-    total_pages = math.ceil(total_found / limit_numeric) if limit_numeric > 0 and total_found > 0 else 1
-    
-    conn = get_db_connection()
+
+    limit_numeric = int(limit) if limit != "all" else 0
+    total_pages = (
+        math.ceil(total_found / limit_numeric)
+        if limit_numeric > 0 and total_found > 0
+        else 1
+    )
+
+    conn = get_connection()
     total_count = 0
     try:
         with conn.cursor() as cursor:
@@ -555,8 +596,8 @@ def search(request: Request, user=Depends(require_login),
         "total_count": total_count, "results": results, "search_query": search_query_clean, 
         "status_filter": status_filter, "place_filter": place_filter, "project_filter": project_filter, 
         "date_from": date_from, "date_to": date_to, 
-        "current_page": page, "limit": limit, "total_pages": total_pages, "sort_dir": sort_dir, 
-        "project_list": PROJECTS_LIST, "job_titles": get_all_job_titles(), "current_user": user,
+        "current_page": page, "limit": limit, "total_pages": total_pages, "sort_dir": sort_dir,
+        "project_list": get_project_names(), "job_titles": get_all_job_titles(), "current_user": user,
         "show_archived": is_archived_view
     })
 
@@ -566,7 +607,8 @@ def search(request: Request, user=Depends(require_login),
 
 @app.get("/employee/{emp_id}")
 def get_employee_details(emp_id: int, user=Depends(require_login)):
-    conn = get_db_connection()
+    """Отдаёт карточку сотрудника, если его можно посмотреть."""
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             if not can_view_employee(cursor, user, emp_id):
@@ -598,18 +640,32 @@ def add_user(
     places: list[str] = Form([]), projects: list[str] = Form([]),
     job_title_id: int = Form(None), current_search: str = Form(""), is_lookalike: str = Form("false")
 ):
-    conn = get_db_connection()
+    """Добавляет одного сотрудника. Старший и тренер сюда не допускаются."""
+    require_editor(user)
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cleaned_phone = clean_phone_number(phone)
             formatted_birthday = clean_birthday(birthday)
-            
+
             second_name, first_name, curname, login_ad = generate_unique_login(cursor, fio)
             shared_password = generate_password()
-            
+
             if job_title_id is None:
                 job_title_id = get_job_id_by_code(cursor, "OP")
-            
+
+            # Не даём назначить должность выше своей.
+            permitted_codes = allowed_job_codes(user, get_all_job_codes(cursor))
+            cursor.execute("SELECT code FROM JobTitle WHERE id = %s", (job_title_id,))
+            job_row = cursor.fetchone()
+            if permitted_codes is not None and (
+                job_row is None or job_row["code"] not in permitted_codes
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Нельзя назначить такую должность",
+                )
+
             cursor.execute('''
                 INSERT INTO Employee (first_name, second_name, curname, phone, birthday, login_ad, password_ad, email_telescope, email_cross, password_email, id_status)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
@@ -626,12 +682,15 @@ def add_user(
             sync_employee_projects(cursor, person_id, projects, job_title_id, login_ad)
                     
         conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
         return HTMLResponse(content=f"<h3>Ошибка базы данных: {e}</h3>", status_code=400)
     finally:
         conn.close()
-        
+
     all_jobs = get_all_job_titles()
     selected_job = next((j for j in all_jobs if j['id'] == job_title_id), None)
     job_name = f"{selected_job['name']} ({selected_job['code']})" if selected_job else "OP (Оператор)"
@@ -644,157 +703,298 @@ def add_user(
 
 @app.get("/employee/{emp_id}/edit_data")
 def get_edit_data(emp_id: int, user=Depends(require_login)):
-    conn = get_db_connection()
+    """Отдаёт данные для окна редактирования и списки доступных вариантов."""
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             if not can_edit_employee(cursor, user, emp_id):
                 return {"error": "У вас нет прав на редактирование данных."}
-                
-            cursor.execute("SELECT id, second_name, first_name, curname, phone, id_status FROM Employee WHERE id = %s AND is_deleted = 0", (emp_id,))
+
+            cursor.execute(
+                """
+                SELECT id, second_name, first_name, curname, phone, id_status
+                FROM Employee
+                WHERE id = %s AND is_deleted = 0
+                """,
+                (emp_id,),
+            )
             person = cursor.fetchone()
-            if not person: return {"error": "Employee not found"}
-            
-            cursor.execute("SELECT id_project, id_job FROM Project_Employee WHERE id_emp = %s AND is_deleted = 0", (emp_id,))
-            person['project_jobs'] = {r['id_project']: r['id_job'] for r in cursor.fetchall()}
-            
-            cursor.execute("SELECT id_loc FROM Location_Employee WHERE id_emp = %s AND is_deleted = 0", (emp_id,))
-            person['selected_places'] = [r['id_loc'] for r in cursor.fetchall()]
-            
-            my_job = user['effective_job_code']
-            
-            if my_job == 'IT' or user['id_role'] == 2:
-                cursor.execute("SELECT id, name FROM Project WHERE is_deleted = 0 ORDER BY name")
-                allowed_projects = cursor.fetchall()
-                cursor.execute("SELECT id, code, name FROM JobTitle ORDER BY id ASC")
-                allowed_jobs = cursor.fetchall()
-            elif my_job == 'ADM':
-                cursor.execute("SELECT id, name FROM Project WHERE is_deleted = 0 ORDER BY name")
-                allowed_projects = cursor.fetchall()
-                cursor.execute("SELECT id, code, name FROM JobTitle WHERE code NOT IN ('IT', 'ADM') ORDER BY id ASC")
-                allowed_jobs = cursor.fetchall()
-            elif my_job in ['SV', 'RP']:
-                cursor.execute("""
-                    SELECT DISTINCT p.id, p.name FROM Project p
-                    JOIN Project_Employee pe ON p.id = pe.id_project
-                    JOIN JobTitle jt ON pe.id_job = jt.id
-                    WHERE pe.id_emp = %s AND jt.code IN ('SV', 'RP') AND pe.is_deleted = 0
-                    ORDER BY p.name
-                """, (user['id'],))
-                allowed_projects = cursor.fetchall()
-                
-                # SV может назначать до себя (ОП, СТ, ТР), а RP еще и СВ
-                allowed_codes = "('OP', 'ST', 'TR', 'SV')" if my_job == 'RP' else "('OP', 'ST', 'TR')"
-                cursor.execute(f"SELECT id, code, name FROM JobTitle WHERE code IN {allowed_codes} ORDER BY id ASC")
-                allowed_jobs = cursor.fetchall()
-            else:
+            if not person:
+                return {"error": "Сотрудник не найден"}
+
+            cursor.execute(
+                """
+                SELECT id_project, id_job
+                FROM Project_Employee
+                WHERE id_emp = %s AND is_deleted = 0
+                """,
+                (emp_id,),
+            )
+            person["project_jobs"] = {
+                row["id_project"]: row["id_job"] for row in cursor.fetchall()
+            }
+
+            cursor.execute(
+                """
+                SELECT id_loc
+                FROM Location_Employee
+                WHERE id_emp = %s AND is_deleted = 0
+                """,
+                (emp_id,),
+            )
+            person["selected_places"] = [row["id_loc"] for row in cursor.fetchall()]
+
+            # Списки проектов и должностей тоже определяются в access.py.
+            allowed_projects = get_allowed_projects(cursor, user)
+            allowed_jobs = get_allowed_jobs(cursor, user)
+            if not allowed_projects or not allowed_jobs:
                 return {"error": "У вас нет прав на редактирование проектов."}
 
-            return {"person": person, "all_projects": allowed_projects, "all_jobs": allowed_jobs}
+            return {
+                "person": person,
+                "all_projects": allowed_projects,
+                "all_jobs": allowed_jobs,
+            }
     finally:
         conn.close()
 
 @app.post("/employee/{emp_id}/update")
-def update_employee(
+async def update_employee(
     request: Request, emp_id: int, user=Depends(require_login),
-    status_id: int = Form(...), phone: str = Form(None), 
-    places: list[str] = Form([]), current_search: str = Form("")
+    status_id: int = Form(...), phone: str = Form(None),
+    places: list[str] = Form([]), current_search: str = Form(""),
 ):
-    conn = get_db_connection()
+    """Сохраняет карточку и записывает разницу в журнал изменений.
+
+    Связи с проектами и локациями не удаляются навсегда: старые строки только
+    помечаются недействительными. Так история остается в базе.
+    """
+    form_data = await request.form()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             if not can_edit_employee(cursor, user, emp_id):
-                return HTMLResponse("<script>alert('У вас нет прав на редактирование.'); window.history.back();</script>")
+                return HTMLResponse(
+                    "<script>alert('У вас нет прав на редактирование.'); "
+                    "window.history.back();</script>"
+                )
 
             cleaned_phone = clean_phone_number(phone)
-            
-            cursor.execute("SELECT phone, id_status, login_ad FROM Employee WHERE id = %s", (emp_id,))
-            old_data = cursor.fetchone()
-            
-            cursor.execute("UPDATE Employee SET id_status = %s, phone = %s, updated_at = NOW(), updated_by = %s WHERE id = %s", (status_id, cleaned_phone, user['id'], emp_id))
-            
-            cursor.execute("""
-                SELECT p.name, jt.code FROM Project_Employee pe
-                JOIN Project p ON pe.id_project = p.id
-                JOIN JobTitle jt ON pe.id_job = jt.id
-                WHERE pe.id_emp = %s AND pe.is_deleted = 0
-            """, (emp_id,))
-            old_projects_list = [f"{r['name']} ({r['code']})" for r in cursor.fetchall()]
-            
-            cursor.execute("DELETE FROM Location_Employee WHERE id_emp = %s", (emp_id,))
-            for place_name in places:
-                loc_id = get_or_create_location(cursor, place_name)
-                if loc_id:
-                    cursor.execute("INSERT IGNORE INTO Location_Employee (id_loc, id_emp) VALUES (%s, %s)", (loc_id, emp_id))
-                
-            cursor.execute("DELETE FROM Project_Employee WHERE id_emp = %s", (emp_id,))
-            cursor.execute("DELETE FROM TouchPoint WHERE id_emp = %s", (emp_id,))
-            
-            form_data = request._form
-            selected_projects = form_data.getlist("selected_projects")
-            new_projects_list = []
-            
-            if old_data and old_data['login_ad']:
-                for proj_id in selected_projects:
-                    job_id = form_data.get(f"job_for_project_{proj_id}")
-                    if not job_id: continue
-                    
-                    my_job = user['effective_job_code']
-                    if my_job in ['SV', 'RP']:
-                        cursor.execute("""
-                            SELECT 1 FROM Project_Employee pe 
-                            JOIN JobTitle jt ON pe.id_job = jt.id 
-                            WHERE pe.id_emp = %s AND pe.id_project = %s AND jt.code IN ('SV', 'RP') AND pe.is_deleted = 0
-                        """, (user['id'], proj_id))
-                        if not cursor.fetchone(): continue
-                            
-                        cursor.execute("SELECT code FROM JobTitle WHERE id = %s", (job_id,))
-                        target_job = cursor.fetchone()
-                        
-                        allowed_codes = ('OP', 'ST', 'TR', 'SV') if my_job == 'RP' else ('OP', 'ST', 'TR')
-                        if not target_job or target_job['code'] not in allowed_codes: continue
 
-                    cursor.execute("INSERT IGNORE INTO Project_Employee (id_project, id_emp, id_job) VALUES (%s, %s, %s)", (proj_id, emp_id, job_id))
-                    
-                    cursor.execute("SELECT name FROM Project WHERE id = %s", (proj_id,))
-                    proj_row = cursor.fetchone()
-                    if proj_row:
-                        proj_name = proj_row['name']
-                        tp_login = make_touchpoint_login(old_data['login_ad'], proj_name)
-                        if tp_login:
-                            cursor.execute("INSERT IGNORE INTO TouchPoint (id_project, id_emp, name) VALUES (%s, %s, %s)", (proj_id, emp_id, tp_login))
-                            
-                    cursor.execute("SELECT code FROM JobTitle WHERE id = %s", (job_id,))
-                    job_code_row = cursor.fetchone()
-                    if job_code_row:
-                        new_projects_list.append(f"{proj_name} ({job_code_row['code']})")
-                        
-            changes = []
-            if old_data and old_data['phone'] != cleaned_phone: changes.append({"field": "Телефон", "old": old_data['phone'], "new": cleaned_phone})
-            if old_data and old_data['id_status'] != status_id: changes.append({"field": "Статус", "old": old_data['id_status'], "new": status_id})
-            
-            old_proj_str = ", ".join(sorted(old_projects_list)) if old_projects_list else "Нет"
-            new_proj_str = ", ".join(sorted(new_projects_list)) if new_projects_list else "Нет"
-            
-            if old_proj_str != new_proj_str:
-                changes.append({"field": "Проекты и Должности", "old": old_proj_str, "new": new_proj_str})
-            
+            cursor.execute(
+                "SELECT phone, id_status, login_ad FROM Employee WHERE id = %s",
+                (emp_id,),
+            )
+            old_data = cursor.fetchone()
+            if old_data is None:
+                return HTMLResponse("<h3>Сотрудник не найден</h3>", status_code=404)
+
+            # Запоминаем, что было до изменений — это попадёт в журнал.
+            cursor.execute(
+                """
+                SELECT l.name
+                FROM Location_Employee le
+                JOIN Location l ON l.id = le.id_loc
+                WHERE le.id_emp = %s AND le.is_deleted = 0
+                ORDER BY l.name
+                """,
+                (emp_id,),
+            )
+            old_places = sorted(row["name"] for row in cursor.fetchall())
+
+            cursor.execute(
+                """
+                SELECT p.name, jt.code
+                FROM Project_Employee pe
+                JOIN Project p ON p.id = pe.id_project
+                JOIN JobTitle jt ON jt.id = pe.id_job
+                WHERE pe.id_emp = %s AND pe.is_deleted = 0
+                """,
+                (emp_id,),
+            )
+            old_projects = [
+                f"{row['name']} ({row['code']})" for row in cursor.fetchall()
+            ]
+
+            permitted_projects = {
+                str(row["id"]) for row in get_allowed_projects(cursor, user)
+            }
+            permitted_jobs = allowed_job_codes(user, get_all_job_codes(cursor))
+
+            cursor.execute(
+                """
+                UPDATE Employee
+                SET id_status = %s, phone = %s, updated_at = NOW(), updated_by = %s
+                WHERE id = %s
+                """,
+                (status_id, cleaned_phone, user["id"], emp_id),
+            )
+
+            # Локации: старые связи гасим, новые включаем заново.
+            cursor.execute(
+                """
+                UPDATE Location_Employee
+                SET is_deleted = 1, deleted_at = NOW(), deleted_by = %s
+                WHERE id_emp = %s AND is_deleted = 0
+                """,
+                (user["id"], emp_id),
+            )
+            new_places = []
+            for place_name in places:
+                location_id = get_or_create_location(cursor, place_name)
+                if not location_id:
+                    continue
+                cursor.execute(
+                    """
+                    INSERT INTO Location_Employee (id_loc, id_emp, is_deleted)
+                    VALUES (%s, %s, 0)
+                    ON DUPLICATE KEY UPDATE is_deleted = 0,
+                                           deleted_at = NULL,
+                                           deleted_by = NULL
+                    """,
+                    (location_id, emp_id),
+                )
+                new_places.append(place_name)
+
+            # Проекты и точки входа тоже помечаем недействительными, не удаляем.
+            cursor.execute(
+                """
+                UPDATE Project_Employee
+                SET is_deleted = 1, deleted_at = NOW(), deleted_by = %s
+                WHERE id_emp = %s AND is_deleted = 0
+                """,
+                (user["id"], emp_id),
+            )
+            cursor.execute(
+                """
+                UPDATE TouchPoint
+                SET is_deleted = 1, deleted_at = NOW(), deleted_by = %s
+                WHERE id_emp = %s AND is_deleted = 0
+                """,
+                (user["id"], emp_id),
+            )
+
+            new_projects: list[str] = []
+            if old_data["login_ad"]:
+                for project_id in form_data.getlist("selected_projects"):
+                    if str(project_id) not in permitted_projects:
+                        continue
+
+                    job_id = form_data.get(f"job_for_project_{project_id}")
+                    if not job_id:
+                        continue
+
+                    cursor.execute(
+                        "SELECT code FROM JobTitle WHERE id = %s", (job_id,)
+                    )
+                    job_row = cursor.fetchone()
+                    if job_row is None:
+                        continue
+                    if permitted_jobs is not None and job_row["code"] not in permitted_jobs:
+                        continue
+
+                    cursor.execute(
+                        "SELECT name FROM Project WHERE id = %s", (project_id,)
+                    )
+                    project_row = cursor.fetchone()
+                    if project_row is None:
+                        continue
+                    project_name = project_row["name"]
+
+                    cursor.execute(
+                        """
+                        INSERT INTO Project_Employee
+                            (id_project, id_emp, id_job, is_deleted)
+                        VALUES (%s, %s, %s, 0)
+                        ON DUPLICATE KEY UPDATE is_deleted = 0,
+                                               deleted_at = NULL,
+                                               deleted_by = NULL,
+                                               updated_by = %s
+                        """,
+                        (project_id, emp_id, job_id, user["id"]),
+                    )
+
+                    touchpoint_login = make_touchpoint_login(
+                        old_data["login_ad"], project_name
+                    )
+                    if touchpoint_login:
+                        cursor.execute(
+                            """
+                            INSERT INTO TouchPoint
+                                (id_project, id_emp, name, is_deleted)
+                            VALUES (%s, %s, %s, 0)
+                            ON DUPLICATE KEY UPDATE is_deleted = 0,
+                                                   deleted_at = NULL,
+                                                   deleted_by = NULL
+                            """,
+                            (project_id, emp_id, touchpoint_login),
+                        )
+
+                    new_projects.append(f"{project_name} ({job_row['code']})")
+
+            changes: list[dict[str, Any]] = []
+            if old_data["phone"] != cleaned_phone:
+                changes.append(
+                    {"field": "Телефон", "old": old_data["phone"], "new": cleaned_phone}
+                )
+            if old_data["id_status"] != status_id:
+                changes.append(
+                    {"field": "Статус", "old": old_data["id_status"], "new": status_id}
+                )
+
+            old_projects_text = ", ".join(sorted(old_projects)) or "Нет"
+            new_projects_text = ", ".join(sorted(new_projects)) or "Нет"
+            if old_projects_text != new_projects_text:
+                changes.append(
+                    {
+                        "field": "Проекты и должности",
+                        "old": old_projects_text,
+                        "new": new_projects_text,
+                    }
+                )
+
+            old_places_text = ", ".join(old_places) or "Нет"
+            new_places_text = ", ".join(sorted(set(new_places))) or "Нет"
+            if old_places_text != new_places_text:
+                changes.append(
+                    {
+                        "field": "Локации",
+                        "old": old_places_text,
+                        "new": new_places_text,
+                    }
+                )
+
             if changes:
-                log_change(conn, table_name='Employee', record_id=emp_id, action='UPDATE', id_emp=user['id'], changes=changes, comment="Ручное редактирование карточки")
-                        
+                log_change(
+                    conn,
+                    table_name="Employee",
+                    record_id=emp_id,
+                    action="UPDATE",
+                    id_emp=user["id"],
+                    changes=changes,
+                    comment="Ручное редактирование карточки",
+                )
+
         conn.commit()
-    except Exception as e: 
+    except HTTPException:
         conn.rollback()
-        return HTMLResponse(content=f"<h3>Ошибка обновления: {e}</h3>", status_code=400)
+        raise
+    except Exception as error:
+        conn.rollback()
+        return HTMLResponse(
+            content=f"<h3>Ошибка обновления: {error}</h3>", status_code=400
+        )
     finally:
         conn.close()
-        
-    if current_search: 
+
+    if current_search:
         return RedirectResponse(url=f"/search?query={current_search}", status_code=303)
     return RedirectResponse(url="/", status_code=303)
 
 @app.delete("/employee/{emp_id}")
 def delete_employee(emp_id: int, user=Depends(require_login)):
-    conn = get_db_connection()
+    """Отправляет сотрудника в архив, не удаляя данные навсегда."""
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             if not can_edit_employee(cursor, user, emp_id):
@@ -813,10 +1013,11 @@ def delete_employee(emp_id: int, user=Depends(require_login)):
 
 @app.post("/employee/{emp_id}/restore")
 def restore_employee(emp_id: int, user=Depends(require_login)):
+    """Возвращает сотрудника из архива. Доступно IT и администратору."""
     if user['effective_job_code'] not in ['IT', 'ADM'] and user['id_role'] != 2:
         return {"status": "error", "error": "У вас нет прав на восстановление"}
         
-    conn = get_db_connection()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("UPDATE Employee SET is_deleted = 0, deleted_at = NULL, deleted_by = NULL WHERE id = %s", (emp_id,))
@@ -832,12 +1033,43 @@ def restore_employee(emp_id: int, user=Depends(require_login)):
 
 @app.delete("/employee/{emp_id}/hard_delete")
 def hard_delete_employee(emp_id: int, user=Depends(require_login)):
-    if not user['can_hard_delete']:
+    """Физически удаляет запись. Доступно только суперпользователю.
+
+    Перед удалением обязательно сохраняем, кто и что удалил, в журнал.
+    """
+    if not user["can_hard_delete"]:
         return {"status": "error", "error": "У вас нет прав на физическое удаление"}
-        
-    conn = get_db_connection()
+
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT CONCAT(second_name, ' ', first_name) AS full_name
+                FROM Employee
+                WHERE id = %s
+                """,
+                (emp_id,),
+            )
+            employee = cursor.fetchone()
+            if employee is None:
+                return {"status": "error", "error": "Сотрудник не найден"}
+
+            log_change(
+                conn,
+                table_name="Employee",
+                record_id=emp_id,
+                action="HARD_DELETE",
+                id_emp=user["id"],
+                changes=[
+                    {
+                        "field": "Запись",
+                        "old": employee["full_name"],
+                        "new": "Удалена навсегда",
+                    }
+                ],
+                comment="Физическое удаление записи",
+            )
             cursor.execute("DELETE FROM Employee WHERE id = %s", (emp_id,))
         conn.commit()
         return {"status": "success"}
@@ -849,6 +1081,7 @@ def hard_delete_employee(emp_id: int, user=Depends(require_login)):
 
 @app.get("/check_duplicate")
 def check_duplicate(fio: str, user=Depends(require_login)):
+    """Ищет в базе человека с таким же ФИО, чтобы не завести дубликат."""
     try:
         parts = fio.split()
         if len(parts) < 2: return {"exists": False}
@@ -857,7 +1090,7 @@ def check_duplicate(fio: str, user=Depends(require_login)):
         first_name = normalize_name(parts[1])
         curname = normalize_name(parts[2]) if len(parts) > 2 else ""
         
-        conn = get_db_connection()
+        conn = get_connection()
         try:
             with conn.cursor() as cursor:
                 cursor.execute('''
@@ -898,6 +1131,8 @@ async def import_file(
     file: UploadFile = File(...), default_project: str = Form(None),
     default_places: list[str] = Form([])
 ):
+    """Читает загруженный файл и показывает, кого из строк мы добавим."""
+    require_editor(user, mass_operation=True)
     contents = await file.read()
     filename = file.filename.lower()
     parsed_rows = []
@@ -922,7 +1157,7 @@ async def import_file(
             })
 
     elif filename.endswith('.xlsx'):
-        df = pd.read_excel(io.BytesIO(contents), dtype=str)
+        df = read_excel_quietly(io.BytesIO(contents), dtype=str)
         df.columns = [str(c).strip().lower() for c in df.columns]
         has_fio = "фио" in df.columns
         has_split_name = "фамилия" in df.columns and "имя" in df.columns
@@ -964,7 +1199,7 @@ async def import_file(
     else:
         return HTMLResponse(content="<h3>Ошибка: Неподдерживаемый формат файла</h3>", status_code=400)
 
-    conn = get_db_connection()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             for person in parsed_rows:
@@ -997,12 +1232,17 @@ async def import_file(
     return templates.TemplateResponse(request=request, name="import_preview.html", context={"rows": parsed_rows, "total_count": len(parsed_rows), "current_user": user})
 
 @app.post("/confirm_import", response_class=HTMLResponse)
-def confirm_import(request: Request, user=Depends(require_login), import_indexes: list[int] = Form([])):
-    form_data = request._form
+async def confirm_import(
+    request: Request, user=Depends(require_login),
+    import_indexes: list[int] = Form([]),
+):
+    """Добавляет в базу выбранные строки из файла."""
+    require_editor(user, mass_operation=True)
+    form_data = await request.form()
     success_reports = []
     ignored_count = 0
     
-    conn = get_db_connection()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             total_rows = sum(1 for key in form_data.keys() if key.startswith('second_name_'))
@@ -1061,8 +1301,10 @@ def confirm_import(request: Request, user=Depends(require_login), import_indexes
 
 @app.post("/enrich_file")
 async def enrich_file(request: Request, user=Depends(require_login), file: UploadFile = File(...)):
+    """Ищет в файле телефоны и даты рождения и показывает, что можно дополнить."""
+    require_editor(user, mass_operation=True)
     contents = await file.read()
-    df = pd.read_excel(io.BytesIO(contents), dtype=str)
+    df = read_excel_quietly(io.BytesIO(contents), dtype=str)
     df.columns = [str(c).strip().lower() for c in df.columns]
     
     has_fio = "фио" in df.columns
@@ -1072,7 +1314,7 @@ async def enrich_file(request: Request, user=Depends(require_login), file: Uploa
         
     birthday_col = next((c for c in ['день рождения', 'дата рождения', 'др', 'рождение', 'birthday'] if c in df.columns), None)
     enrich_rows = []
-    conn = get_db_connection()
+    conn = get_connection()
     
     try:
         with conn.cursor() as cursor:
@@ -1149,10 +1391,15 @@ async def enrich_file(request: Request, user=Depends(require_login), file: Uploa
     return templates.TemplateResponse(request=request, name="enrich_preview.html", context={"rows": enrich_rows, "total_count": len(enrich_rows), "current_user": user})
 
 @app.post("/confirm_enrich", response_class=HTMLResponse)
-def confirm_enrich(request: Request, user=Depends(require_login), enrich_indexes: list[int] = Form([])):
-    form_data = request._form
+async def confirm_enrich(
+    request: Request, user=Depends(require_login),
+    enrich_indexes: list[int] = Form([]),
+):
+    """Сохраняет выбранные телефоны и даты рождения и пишет отчёт."""
+    require_editor(user, mass_operation=True)
+    form_data = await request.form()
     report_list = []
-    conn = get_db_connection()
+    conn = get_connection()
     try:
         with conn.cursor() as cursor:
             total_rows = sum(1 for key in form_data.keys() if key.startswith('db_id_'))
@@ -1192,6 +1439,13 @@ def confirm_enrich(request: Request, user=Depends(require_login), enrich_indexes
         "hide_details": len(report_list) > 10, "current_user": user
     })
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8080, reload=True)
+
+    # Адрес и порт берём из config.ini, а не из текста программы.
+    uvicorn.run(
+        "main:app",
+        host=WEB_CONFIG["host"],
+        port=WEB_CONFIG["port"],
+        reload=WEB_CONFIG["reload"],
+    )

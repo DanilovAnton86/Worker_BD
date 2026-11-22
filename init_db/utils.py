@@ -1,20 +1,36 @@
-﻿import secrets
-import string
+﻿import datetime
 import re
-import datetime
+import secrets
+import string
+import warnings
+
+import pandas as pd
+
+
+def read_excel_quietly(source, **kwargs):
+    """Читает Excel и убирает одно известное безобидное предупреждение.
+
+    openpyxl ругается на проверки данных внутри файла Excel. Если их не
+    показывать, на пароли и имена это не влияет. Другие предупреждения
+    остаются видимыми.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Data Validation extension is not supported",
+            category=UserWarning,
+        )
+        return pd.read_excel(source, **kwargs)
+
 
 def sanitize_value(val) -> str:
     """Универсальная защита от NaN, None, 'nan', 'None' и пустот из Excel"""
     if val is None:
         return ""
-    
+
     # Проверка на pandas NaN
-    try:
-        import pandas as pd
-        if pd.isna(val):
-            return ""
-    except ImportError:
-        pass
+    if pd.isna(val):
+        return ""
 
     # Если пришло число с плавающей точкой (например, телефон 9048280519.0)
     if isinstance(val, float) and val.is_integer():
@@ -61,7 +77,9 @@ def generate_password(length: int = 12) -> str:
             any(c.isdigit() for c in password)):
             return password
 
-def parse_fio_and_make_login(fio_str: str, f_len: int = 1, c_len: int = 1) -> tuple[str, str, str, str]:
+def parse_fio_and_make_login(
+    fio_str: str, f_len: int = 1, c_len: int = 1
+) -> tuple[str, str, str, str]:
     fio_str = sanitize_value(fio_str)
     parts = fio_str.split()
     
@@ -102,23 +120,40 @@ def clean_phone_number(phone_str) -> str:
     return "".join(filter(str.isdigit, phone_str))
 
 def clean_birthday(date_str):
+    """Приводит дату рождения к виду ГГГГ-ММ-ДД.
+
+    Понимает обычные даты (03.03.1979, 1979-03-03) и числа из Excel,
+    которые хранят дату как количество дней с 30 декабря 1899 года.
+    """
     date_str = sanitize_value(date_str)
-    if not date_str: return None
-    
-    if ' ' in date_str:
+    if not date_str:
+        return None
+
+    # В Excel к дате иногда прилипает время — отрезаем его.
+    if " " in date_str:
         date_str = date_str.split()[0]
+
+    # Серийный номер Excel: например, 28942 вместо 03.03.1979.
+    if date_str.isdigit() and len(date_str) > 4:
+        try:
+            excel_date = datetime.datetime(1899, 12, 30) + datetime.timedelta(
+                days=int(date_str)
+            )
+            return excel_date.strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
+            return None
 
     if date_str.isdigit() and len(date_str) <= 2:
         return None
 
-    date_str = date_str.replace('/', '.').replace('-', '.').replace(',', '.')
-    parts = date_str.split('.')
+    date_str = date_str.replace("/", ".").replace("-", ".").replace(",", ".")
+    parts = date_str.split(".")
 
     if len(parts) == 3:
         try:
-            if len(parts[0]) == 4: # ГГГГ.ММ.ДД
+            if len(parts[0]) == 4:  # ГГГГ.ММ.ДД
                 year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
-            else: # ДД.ММ.ГГГГ
+            else:  # ДД.ММ.ГГГГ
                 day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
                 if len(parts[2]) == 2:
                     year += 1900 if year > 30 else 2000
@@ -126,7 +161,7 @@ def clean_birthday(date_str):
             current_year = datetime.date.today().year
             if 1900 <= year <= current_year:
                 valid_date = datetime.date(year, month, day)
-                return valid_date.strftime('%Y-%m-%d')
+                return valid_date.strftime("%Y-%m-%d")
         except ValueError:
             return None
     return None

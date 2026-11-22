@@ -1,0 +1,29 @@
+# Пример службы для Linux (systemd).
+# 1. Положите файл в /etc/systemd/system/crm.service.
+# 2. Замените /opt/crm на свою папку и user/group на своего пользователя.
+# 3. Выполните:
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable crm
+#    sudo systemctl start crm
+# 4. Посмотреть состояние: sudo systemctl status crm
+# 5. Посмотреть записи: journalctl -u crm -f
+#
+# В config.ini для сервера укажите host = 0.0.0.0 и reload = false.
+
+[Unit]
+Description=CRM ucheta sotrudnikov call-centra
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crm
+Group=crm
+WorkingDirectory=/opt/crm
+Environment=APP_CONFIG=/opt/crm/config.ini
+ExecStart=/usr/bin/python3 /opt/crm/server.py --no-reload
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

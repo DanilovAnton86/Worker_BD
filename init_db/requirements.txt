@@ -1,0 +1,11 @@
+# Список библиотек, которые нужны программе.
+# Установка: python -m pip install -r requirements.txt
+
+fastapi>=0.110
+uvicorn>=0.27
+jinja2>=3.1
+python-multipart>=0.0.9
+pymysql>=1.1
+pandas>=2.0
+openpyxl>=3.1
+ldap3>=2.9

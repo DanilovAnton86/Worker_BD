@@ -1,0 +1,22 @@
+Пример установки службы на Windows через NSSM.
+
+1. Скачайте NSSM с https://nssm.cc/download и распакуйте.
+2. Откройте командную строку от имени администратора.
+3. Перейдите в папку с nssm.exe (например, C:\nssm\win64).
+4. Выполните команды, заменив пути на свои:
+
+   nssm install CRM "C:\Python313\python.exe" "C:\crm\server.py --no-reload"
+   nssm set CRM AppDirectory C:\crm
+   nssm set CRM AppEnvironmentExtra APP_CONFIG=C:\crm\config.ini
+   nssm set CRM AppStdout C:\crm\logs\service.out.log
+   nssm set CRM AppStderr C:\crm\logs\service.err.log
+   nssm set CRM Start SERVICE_AUTO_START
+   nssm start CRM
+
+5. Проверить состояние: nssm status CRM
+6. Остановить: nssm stop CRM
+7. Удалить службу: nssm remove CRM confirm
+
+В config.ini для сервера укажите host = 0.0.0.0 и reload = false.
+Если сайт должен быть виден с других компьютеров, откройте порт
+в брандмауэре Windows.

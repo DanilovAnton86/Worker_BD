@@ -31,7 +31,7 @@
                 </div>
                 <div class="search-group">
                     <label>Статус:</label>
-                    <select name="status_filter" onchange="document.getElementById('mainSearchForm').submit()">
+                    <select name="status_filter" onchange="resetPageAndSubmit()">
                         <option value="all" {% if status_filter=='all' %}selected{% endif %}>Все</option>
                         <option value="1" {% if status_filter=='1' %}selected{% endif %}>Активен</option>
                         <option value="2" {% if status_filter=='2' %}selected{% endif %}>Уволен</option>
@@ -40,7 +40,7 @@
                 </div>
                 <div class="search-group">
                     <label>Проект:</label>
-                    <select name="project_filter" onchange="document.getElementById('mainSearchForm').submit()">
+                    <select name="project_filter" onchange="resetPageAndSubmit()">
                         <option value="all" {% if project_filter=='all' %}selected{% endif %}>Все</option>
                         {% for project in project_list %}
                         <option value="{{ project }}" {% if project_filter==project %}selected{% endif %}>{{ project }}</option>
@@ -52,33 +52,33 @@
             <div class="search-row" style="border-top: 1px solid #eee; padding-top: 15px;">
                 <div class="search-group">
                     <label>Дата (от):</label>
-                    <input type="date" name="date_from" value="{{ date_from if date_from else '' }}">
+                    <input type="date" name="date_from" value="{{ date_from if date_from else '' }}" onchange="resetPageAndSubmit()">
                 </div>
                 <div class="search-group">
                     <label>Дата (до):</label>
-                    <input type="date" name="date_to" value="{{ date_to if date_to else '' }}">
+                    <input type="date" name="date_to" value="{{ date_to if date_to else '' }}" onchange="resetPageAndSubmit()">
                 </div>
                 <div class="search-group">
                     <label>Локация:</label>
                     <div class="search-group-checkbox">
-                        <label><input type="checkbox" name="place_filter" value="Офис" {% if 'Офис' in place_filter %}checked{% endif %}> Офис</label>
-                        <label><input type="checkbox" name="place_filter" value="Дом" {% if 'Дом' in place_filter %}checked{% endif %}> Дом</label>
+                        <label><input type="checkbox" name="place_filter" value="Офис" {% if 'Офис' in place_filter %}checked{% endif %} onchange="resetPageAndSubmit()"> Офис</label>
+                        <label><input type="checkbox" name="place_filter" value="Дом" {% if 'Дом' in place_filter %}checked{% endif %} onchange="resetPageAndSubmit()"> Дом</label>
                     </div>
                 </div>
                 {% if current_user.effective_job_code in ['IT', 'ADM'] or current_user.id_role == 2 %}
                 <div class="search-group">
                     <label>Архив:</label>
                     <div class="search-group-checkbox" style="background: #ffeeba; border-color: #ffdf7e;">
-                        <label><input type="checkbox" name="show_archived" value="true" {% if show_archived %}checked{% endif %} onchange="document.getElementById('mainSearchForm').submit()"> Показать удаленных</label>
+                        <label><input type="checkbox" name="show_archived" value="true" {% if show_archived %}checked{% endif %} onchange="resetPageAndSubmit()"> Показать удаленных</label>
                     </div>
                 </div>
                 {% endif %}
                 <div class="search-group">
                     <label>Строк:</label>
-                    <select name="limit">
-                        <option value="50" {% if limit==50 %}selected{% endif %}>50</option>
-                        <option value="100" {% if limit==100 %}selected{% endif %}>100</option>
-                        <option value="all" {% if limit=='all' %}selected{% endif %}>Все</option>
+                    <select name="limit" onchange="resetPageAndSubmit()">
+                        <option value="50" {% if limit|string=='50' %}selected{% endif %}>50</option>
+                        <option value="100" {% if limit|string=='100' %}selected{% endif %}>100</option>
+                        <option value="all" {% if limit|string=='all' %}selected{% endif %}>Все</option>
                     </select>
                 </div>
                 <div class="search-actions">
@@ -86,6 +86,7 @@
                     <button type="button" onclick="showAllEmployees()" class="btn btn-secondary">Сброс</button>
                 </div>
             </div>
+            <input type="hidden" name="page" id="currentPageInput" value="{{ current_page if current_page else 1 }}">
         </form>
         
         <!-- ПЛАШКА СЧЁТЧИКА И КНОПКИ ЭКСПОРТА -->
@@ -357,6 +358,13 @@
             mainForm.appendChild(sortInput);
         }
 
+        // При смене любого фильтра возвращаемся на первую страницу.
+        // Иначе можно остаться на пятой странице, где после нового поиска ничего нет.
+        function resetPageAndSubmit() {
+            document.getElementById('currentPageInput').value = 1;
+            document.getElementById('mainSearchForm').submit();
+        }
+
         async function openEmployeeModal(empld) {
             const modal = document.getElementById('employeeModal');
             document.getElementById('m_fio').innerText = "Загрузка...";
@@ -529,8 +537,9 @@
         }
 
         function changePage(pageNumber) {
+            // Явно берём форму по её имени и меняем скрытое поле с номером страницы.
             document.getElementById('currentPageInput').value = pageNumber;
-            mainForm.submit();
+            document.getElementById('mainSearchForm').submit();
         }
 
         function showAllEmployees() {
