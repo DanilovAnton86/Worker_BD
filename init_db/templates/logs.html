@@ -37,6 +37,8 @@
                         <option value="INSERT" {% if action_filter=='INSERT' %}selected{% endif %}>Создание</option>
                         <option value="UPDATE" {% if action_filter=='UPDATE' %}selected{% endif %}>Изменение</option>
                         <option value="SOFT_DELETE" {% if action_filter=='SOFT_DELETE' %}selected{% endif %}>Архивация</option>
+                        <option value="RESTORE" {% if action_filter=='RESTORE' %}selected{% endif %}>Восстановление</option>
+                        <option value="HARD_DELETE" {% if action_filter=='HARD_DELETE' %}selected{% endif %}>Удалён навсегда</option>
                     </select>
                 </div>
             </div>
@@ -89,10 +91,17 @@
                     {% elif log.action == 'UPDATE' %}<span class="status-badge status-2" style="background:#fff3cd; color:#856404;">Изменение</span>
                     {% elif log.action == 'SOFT_DELETE' %}<span class="status-badge status-0">Архив</span>
                     {% elif log.action == 'RESTORE' %}<span class="status-badge status-1" style="background-color: #d4edda; color: #155724;">Восстановлен</span>
+                    {% elif log.action == 'HARD_DELETE' %}<span class="status-badge" style="background-color: #dc3545; color: #fff;">Удалён</span>
                     {% else %}{{ log.action }}{% endif %}
                 </td>
                 <td>
+                    {% if log.target_id %}
+                    <a href="/?open_employee={{ log.target_id }}&return_to={{ return_url|urlencode }}"
+                       style="color: #0056b3; font-weight: 600; text-decoration: none;"
+                       title="Открыть карточку сотрудника">{{ log.target_name }}</a>
+                    {% else %}
                     {{ log.target_name or '—' }}
+                    {% endif %}
                     {% if log.comment %}<br><small style="color: #888;">({{ log.comment }})</small>{% endif %}
                 </td>
                 <td><small>{{ log.projects or '—' }}</small></td>
@@ -109,11 +118,11 @@
     <!-- Простая пагинация (можно улучшить) -->
     <div style="margin-top: 20px; display: flex; justify-content: center; gap: 10px;">
         {% if page > 1 %}
-        <a href="/logs?page={{ page - 1 }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&target_fio={{ target_fio or '' }}&changer_fio={{ changer_fio or '' }}&project_filter={{ project_filter }}" class="btn btn-secondary">Назад</a>
+        <a href="/logs?page={{ page - 1 }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&target_fio={{ target_fio or '' }}&changer_fio={{ changer_fio or '' }}&project_filter={{ project_filter }}&action_filter={{ action_filter or 'all' }}" class="btn btn-secondary">Назад</a>
         {% endif %}
         <span style="padding: 10px;">Страница {{ page }}</span>
         {% if logs|length == 50 %}
-        <a href="/logs?page={{ page + 1 }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&target_fio={{ target_fio or '' }}&changer_fio={{ changer_fio or '' }}&project_filter={{ project_filter }}" class="btn btn-secondary">Вперед</a>
+        <a href="/logs?page={{ page + 1 }}&date_from={{ date_from or '' }}&date_to={{ date_to or '' }}&target_fio={{ target_fio or '' }}&changer_fio={{ changer_fio or '' }}&project_filter={{ project_filter }}&action_filter={{ action_filter or 'all' }}" class="btn btn-secondary">Вперед</a>
         {% endif %}
     </div>
 

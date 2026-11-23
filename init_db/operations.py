@@ -145,20 +145,18 @@ def operation_lock(name: str, base_dir: Path = BASE_DIR) -> Iterator[None]:
 def backup_database(config: dict[str, dict[str, Any]]) -> Path | None:
     """Сохраняет копию базы перед изменением данных.
 
-    Если программа для копирования не установлена, предупреждаем и идём дальше.
-    Если она есть, но сработала с ошибкой — останавливаем обновление.
+    Если программа для копирования не установлена, пишем это в журнал
+    и идём дальше. Если она есть, но сработала с ошибкой — останавливаем
+    обновление.
     """
     executable = os.getenv("DUMP_COMMAND") or (
         shutil.which("mariadb-dump") or shutil.which("mysqldump")
     )
     if not executable:
-        message = (
-            "Не найдена программа для резервной копии "
-            "(mariadb-dump или mysqldump). Продолжаем без копии. "
-            "Установите её или укажите путь в DUMP_COMMAND."
+        logger.warning(
+            "Резервная копия не создана: не найдена mariadb-dump "
+            "или mysqldump. Путь можно задать в DUMP_COMMAND."
         )
-        print("ВНИМАНИЕ: " + message)
-        logger.warning(message)
         return None
 
     settings = config[SECTION_DATABASE]

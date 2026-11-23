@@ -48,6 +48,12 @@ def is_superuser(current_user: dict[str, Any]) -> bool:
     return current_user.get("id_role") == 2
 
 
+def can_restore(current_user: dict[str, Any]) -> bool:
+    """Восстанавливать сотрудника из архива могут IT, ADM и суперпользователь."""
+    job_code = current_user.get("effective_job_code")
+    return is_superuser(current_user) or job_code in ("IT", "ADM")
+
+
 def get_all_job_codes(cursor) -> set[str]:
     """Все коды должностей, которые есть в справочнике."""
     cursor.execute("SELECT code FROM JobTitle")

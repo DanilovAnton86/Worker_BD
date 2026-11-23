@@ -10,6 +10,7 @@ import json
 import math
 import os
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -21,6 +22,7 @@ from access import (
     VIEW_LEVELS,
     allowed_job_codes,
     can_edit as access_can_edit,
+    can_restore,
     can_view as access_can_view,
     get_allowed_jobs,
     get_allowed_projects,
@@ -123,6 +125,22 @@ def get_all_job_titles():
             return cursor.fetchall()
     finally:
         conn.close()
+
+
+def get_status_list():
+    """Все статусы из справочника.
+
+    В форме значение — id, а на экране показывается name из этой же строки.
+    Так названия не расходятся с базой и не появляются лишние слова.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, name FROM Status ORDER BY id")
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
 
 def get_job_id_by_code(cursor, code="OP"):
     """Возвращает номер должности по её короткому коду (например, OP)."""
@@ -297,7 +315,8 @@ def view_logs(request: Request, user=Depends(require_login),
     try:
         with conn.cursor() as cursor:
             sql = """
-                SELECT a.id, a.changed_at, a.action, a.comment, a.changes,
+                SELECT a.id, a.record_id, a.changed_at, a.action, a.comment, a.changes,
+                       t.id AS target_id,
                        CONCAT(t.second_name, ' ', t.first_name, ' ', IFNULL(t.curname, '')) as target_name,
                        CONCAT(c.second_name, ' ', c.first_name, ' ', IFNULL(c.curname, '')) as changer_name,
                        GROUP_CONCAT(DISTINCT p.name SEPARATOR ', ') as projects
@@ -339,26 +358,65 @@ def view_logs(request: Request, user=Depends(require_login),
             cursor.execute(sql, tuple(params))
             logs = cursor.fetchall()
 
+            # Названия статусов нужны только для показа. В базе по-прежнему
+            # хранится id_status, поиск по названию нигде не выполняется.
+            cursor.execute("SELECT id, name FROM Status")
+            status_names = {row["id"]: row["name"] for row in cursor.fetchall()}
+
+            def display_value(field: str, value: Any) -> Any:
+                """Показывает статус названием, остальные поля — как есть."""
+                if field != "Статус":
+                    return value
+                try:
+                    return status_names.get(int(value), value)
+                except (TypeError, ValueError):
+                    return value
+
             for log in logs:
-                if log['changes']:
-                    try:
-                        changes_list = json.loads(log['changes'])
-                        log['changes_formatted'] = ", ".join([f"{c['field']}: {c['old']} ➔ {c['new']}" for c in changes_list])
-                    except (TypeError, ValueError, KeyError):
-                        # Если в журнале лежит старый формат, покажем его как есть.
-                        log['changes_formatted'] = log['changes']
+                log["changes_formatted"] = ""
+                if not log["changes"]:
+                    continue
+                try:
+                    changes_list = json.loads(log["changes"])
+                except (TypeError, ValueError):
+                    # Если в журнале лежит старый формат, покажем его как есть.
+                    log["changes_formatted"] = log["changes"]
+                    continue
+
+                if isinstance(changes_list, list):
+                    parts = []
+                    for change in changes_list:
+                        if not isinstance(change, dict):
+                            continue
+                        field = change.get("field", "")
+                        old_value = display_value(field, change.get("old"))
+                        new_value = display_value(field, change.get("new"))
+                        parts.append(f"{field}: {old_value} ➔ {new_value}")
+                    log["changes_formatted"] = ", ".join(parts)
                 else:
-                    log['changes_formatted'] = ""
+                    log["changes_formatted"] = log["changes"]
 
     finally:
         conn.close()
+
+    # Этот адрес вернёт человека в журнал с теми же фильтрами и страницей.
+    return_url = "/logs?" + urlencode({
+        "date_from": date_from or "",
+        "date_to": date_to or "",
+        "target_fio": target_fio or "",
+        "changer_fio": changer_fio or "",
+        "project_filter": project_filter or "all",
+        "action_filter": action_filter or "all",
+        "page": page,
+    })
 
     return templates.TemplateResponse(request=request, name="logs.html", context={
         "current_user": user, "logs": logs,
         "date_from": date_from, "date_to": date_to,
         "target_fio": target_fio, "changer_fio": changer_fio,
         "project_filter": project_filter, "action_filter": action_filter,
-        "project_list": get_project_names(), "page": page
+        "project_list": get_project_names(), "page": page,
+        "return_url": return_url
     })
 
 # ==========================================
@@ -484,8 +542,13 @@ def search_employees_advanced(
                 params.extend([f"%{query_clean}%"] * 4)
                 
             if status_filter and status_filter != 'all':
-                conditions.append("e.id_status = %s")
-                params.append(int(status_filter))
+                try:
+                    status_id = int(status_filter)
+                except (TypeError, ValueError):
+                    status_id = None
+                if status_id is not None:
+                    conditions.append("e.id_status = %s")
+                    params.append(status_id)
                 
             if date_from:
                 conditions.append("e.created_at >= %s")
@@ -557,7 +620,8 @@ def home(request: Request, user=Depends(require_login)):
         "date_from": "", "date_to": "", "sort_dir": "asc",
         "current_page": 1, "limit": "50", "total_pages": 1,
         "project_list": get_project_names(),
-        "job_titles": get_all_job_titles(), "current_user": user, "show_archived": False
+        "job_titles": get_all_job_titles(), "current_user": user,
+        "show_archived": False, "status_list": get_status_list()
     })
 
 @app.get("/search", response_class=HTMLResponse)
@@ -598,7 +662,7 @@ def search(request: Request, user=Depends(require_login),
         "date_from": date_from, "date_to": date_to, 
         "current_page": page, "limit": limit, "total_pages": total_pages, "sort_dir": sort_dir,
         "project_list": get_project_names(), "job_titles": get_all_job_titles(), "current_user": user,
-        "show_archived": is_archived_view
+        "show_archived": is_archived_view, "status_list": get_status_list()
     })
 
 # ==========================================
@@ -628,6 +692,7 @@ def get_employee_details(emp_id: int, user=Depends(require_login)):
             person['touchpoints'] = [r['name'] for r in cursor.fetchall()]
             
             person['can_edit'] = can_edit_employee(cursor, user, emp_id)
+            person['can_restore'] = can_restore(user)
             person['can_hard_delete'] = bool(user['can_hard_delete'])
             return person
     finally:
@@ -710,11 +775,13 @@ def get_edit_data(emp_id: int, user=Depends(require_login)):
             if not can_edit_employee(cursor, user, emp_id):
                 return {"error": "У вас нет прав на редактирование данных."}
 
+            # Архивную карточку тоже разрешаем открыть для правки:
+            # восстановление и изменение данных — разные действия.
             cursor.execute(
                 """
                 SELECT id, second_name, first_name, curname, phone, id_status
                 FROM Employee
-                WHERE id = %s AND is_deleted = 0
+                WHERE id = %s
                 """,
                 (emp_id,),
             )
@@ -763,6 +830,7 @@ async def update_employee(
     request: Request, emp_id: int, user=Depends(require_login),
     status_id: int = Form(...), phone: str = Form(None),
     places: list[str] = Form([]), current_search: str = Form(""),
+    return_to: str = Form(""),
 ):
     """Сохраняет карточку и записывает разницу в журнал изменений.
 
@@ -788,6 +856,15 @@ async def update_employee(
             old_data = cursor.fetchone()
             if old_data is None:
                 return HTMLResponse("<h3>Сотрудник не найден</h3>", status_code=404)
+
+            # Статус проверяем по id. Название нужно только для показа,
+            # поэтому поиска по словам вроде «уволен» здесь нет.
+            cursor.execute("SELECT id FROM Status WHERE id = %s", (status_id,))
+            if cursor.fetchone() is None:
+                return HTMLResponse(
+                    "<h3>Ошибка обновления: выбран неизвестный статус.</h3>",
+                    status_code=400,
+                )
 
             # Запоминаем, что было до изменений — это попадёт в журнал.
             cursor.execute(
@@ -987,6 +1064,9 @@ async def update_employee(
     finally:
         conn.close()
 
+    # Если карточку открыли из журнала, возвращаем туда с теми же фильтрами.
+    if return_to.startswith("/logs"):
+        return RedirectResponse(url=return_to, status_code=303)
     if current_search:
         return RedirectResponse(url=f"/search?query={current_search}", status_code=303)
     return RedirectResponse(url="/", status_code=303)
@@ -1013,8 +1093,11 @@ def delete_employee(emp_id: int, user=Depends(require_login)):
 
 @app.post("/employee/{emp_id}/restore")
 def restore_employee(emp_id: int, user=Depends(require_login)):
-    """Возвращает сотрудника из архива. Доступно IT и администратору."""
-    if user['effective_job_code'] not in ['IT', 'ADM'] and user['id_role'] != 2:
+    """Возвращает сотрудника из архива.
+
+    Доступно IT, администратору и суперпользователю.
+    """
+    if not can_restore(user):
         return {"status": "error", "error": "У вас нет прав на восстановление"}
         
     conn = get_connection()

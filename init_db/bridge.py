@@ -72,6 +72,9 @@ def as_text(value: Any) -> str:
 def group_names(values: Any) -> list[str]:
     """Достаёт короткие имена групп из полных путей вида CN=...,DC=..."""
     names: list[str] = []
+    # Иногда ldap3 отдаёт одну группу строкой, а не списком.
+    if isinstance(values, str):
+        values = [values]
     for value in values or []:
         text = as_text(value).strip()
         if not text:
@@ -115,12 +118,19 @@ def parse_ad_groups(groups: list[str], valid_role_codes: set[str]) -> tuple[list
     return relations, has_invalid_groups
 
 
-def read_ldap_users(connection, search_base: str, search_filter: str,
-                    is_disabled: bool, page_size: int) -> list[dict[str, Any]]:
+def read_ldap_users(
+    connection,
+    search_base: str,
+    search_filter: str,
+    is_disabled: bool,
+    page_size: int,
+) -> list[dict[str, Any]]:
     """Читает людей постранично, чтобы не потерять тех, кто дальше первой страницы."""
     users: list[dict[str, Any]] = []
 
-    for entry in connection.paged_search(
+    # В ldap3 постраничный поиск находится в extend.standard,
+    # а не среди обычных методов Connection.
+    for entry in connection.extend.standard.paged_search(
         search_base=search_base,
         search_filter=search_filter,
         search_scope=SUBTREE,
@@ -128,7 +138,9 @@ def read_ldap_users(connection, search_base: str, search_filter: str,
         paged_size=page_size,
         generator=True,
     ):
-        if entry.get("type") != "search_res":
+        # ldap3 называет найденную строку searchResEntry.
+        # Старое имя search_res оставляем на случай других версий.
+        if entry.get("type") not in ("searchResEntry", "search_res"):
             continue
         attributes = entry.get("attributes", {})
         users.append(
@@ -235,7 +247,11 @@ def sync_ad_to_db(config: dict[str, dict[str, Any]] | None = None) -> None:
     settings = config if config is not None else load_config()
     ad_users = fetch_ad_users(settings)
     if not ad_users:
-        raise OperationError("Список сотрудников пуст — база не изменена.")
+        raise OperationError(
+            "Список сотрудников пуст — база не изменена. "
+            "Проверьте в config.ini адрес сервера, base_dn "
+            "и права пользователя на чтение."
+        )
 
     try:
         with transaction(config=settings) as database:

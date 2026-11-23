@@ -33,9 +33,9 @@
                     <label>Статус:</label>
                     <select name="status_filter" onchange="resetPageAndSubmit()">
                         <option value="all" {% if status_filter=='all' %}selected{% endif %}>Все</option>
-                        <option value="1" {% if status_filter=='1' %}selected{% endif %}>Активен</option>
-                        <option value="2" {% if status_filter=='2' %}selected{% endif %}>Уволен</option>
-                        <option value="3" {% if status_filter=='3' %}selected{% endif %}>Декрет</option>
+                        {% for status in status_list %}
+                        <option value="{{ status.id }}" {% if status_filter|string == status.id|string %}selected{% endif %}>{{ status.name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="search-group">
@@ -305,6 +305,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" id="modalEditBtn" class="btn-modal btn-modal-edit" style="display: none;">Редактировать карточку</button>
+                <button type="button" id="modalRestoreBtn" class="btn-modal" style="display: none; background: #28a745; color: #fff;">Восстановить из архива</button>
                 <button type="button" id="modalDeleteBtn" class="btn-modal btn-modal-delete" style="display: none;">Удалить сотрудника</button>
                 <button type="button" id="modalHardDeleteBtn" class="btn-modal btn-danger-hard" style="display: none;">Удалить навсегда</button>
             </div>        </div>
@@ -317,12 +318,13 @@
             <h3 id="edit_title" style="margin-top: 0; color: #ffc107;">Редактирование сотрудника</h3>
             <form id="editForm" method="post">
                 <input type="hidden" name="current_search" id="edit_current_search" value="">
+                <input type="hidden" name="return_to" id="edit_return_to" value="">
                 <div style="margin-bottom: 15px;">
                     <label>Статус сотрудника: </label><br>
                     <select name="status_id" id="edit_status" style="width: 100%; padding: 8px; margin-top: 5px;">
-                        <option value="1">Active</option>
-                        <option value="0">Fired</option>
-                        <option value="2">Maternity</option>
+                        {% for status in status_list %}
+                        <option value="{{ status.id }}">{{ status.name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 
@@ -376,30 +378,41 @@
 
                 // Получаем ссылки на все кнопки один раз
                 const editBtn = document.getElementById('modalEditBtn');
+                const restoreBtn = document.getElementById('modalRestoreBtn');
                 const deleteBtn = document.getElementById('modalDeleteBtn');
                 const hardDeleteBtn = document.getElementById('modalHardDeleteBtn');
+                const fullName = data.second_name + " " + data.first_name;
 
-                // 🔥 ЛОГИКА ДЛЯ АРХИВНЫХ ЗАПИСЕЙ
-                if (data.is_deleted == 1) {
-                    if (editBtn) editBtn.style.display = 'none';
-                    if (deleteBtn) deleteBtn.style.display = 'none';
-                } else {
-                    // ЛОГИКА ДЛЯ АКТИВНЫХ ЗАПИСЕЙ
-                    if (editBtn) {
-                        if (data.can_edit) {
-                            editBtn.style.display = 'inline-block';
-                            editBtn.onclick = function () { modal.style.display = 'none'; editEmployee(data.id); };
-                        } else {
-                            editBtn.style.display = 'none';
-                        }
+                // Редактировать можно и активного, и архивного сотрудника.
+                if (editBtn) {
+                    if (data.can_edit) {
+                        editBtn.style.display = 'inline-block';
+                        editBtn.onclick = function () { modal.style.display = 'none'; editEmployee(data.id); };
+                    } else {
+                        editBtn.style.display = 'none';
                     }
-                    if (deleteBtn) {
-                        if (data.can_edit) {
-                            deleteBtn.style.display = 'inline-block';
-                            deleteBtn.onclick = function () { deleteEmployee(data.id, data.second_name + " " + data.first_name, modal); };
-                        } else {
-                            deleteBtn.style.display = 'none';
-                        }
+                }
+
+                // В архив отправляем только активного сотрудника.
+                if (deleteBtn) {
+                    if (data.can_edit && data.is_deleted != 1) {
+                        deleteBtn.style.display = 'inline-block';
+                        deleteBtn.onclick = function () { deleteEmployee(data.id, fullName, modal); };
+                    } else {
+                        deleteBtn.style.display = 'none';
+                    }
+                }
+
+                // Восстановление показываем только для архивной записи.
+                if (restoreBtn) {
+                    if (data.is_deleted == 1 && data.can_restore) {
+                        restoreBtn.style.display = 'inline-block';
+                        restoreBtn.onclick = function () {
+                            modal.style.display = 'none';
+                            restoreEmployeeFromCard(data.id, fullName);
+                        };
+                    } else {
+                        restoreBtn.style.display = 'none';
                     }
                 }
 
@@ -464,6 +477,7 @@
                 document.getElementById('edit_status').value = p.id_status;
                 document.getElementById('edit_phone').value = p.phone || "";
                 document.getElementById('edit_current_search').value = document.querySelector('input[name="query"]').value;
+                document.getElementById('edit_return_to').value = new URLSearchParams(window.location.search).get('return_to') || '';
                 document.getElementById('chk_place_office').checked = p.selected_places.includes(1);
                 document.getElementById('chk_place_home').checked = p.selected_places.includes(2);
 
@@ -615,7 +629,7 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
-                async function restoreEmployee(empld, fullName) {
+        async function restoreEmployee(empld, fullName) {
             if (!confirm("Вы действительно хотите восстановить сотрудника " + fullName + " из архива?")) return;
             try {
                 const response = await fetch('/employee/' + empld + '/restore', { method: 'POST' });
@@ -626,6 +640,38 @@
                 } else { alert("Ошибка: " + (data.error || "Неизвестная ошибка")); }
             } catch (err) { console.error(err); alert("Не удалось связаться с сервером"); }
         }
+
+        async function restoreEmployeeFromCard(empld, fullName) {
+            // Восстановление из карточки: после успеха возвращаемся в журнал,
+            // если карточку открыли оттуда.
+            if (!confirm("Вы действительно хотите восстановить сотрудника " + fullName + " из архива?")) return;
+            try {
+                const response = await fetch('/employee/' + empld + '/restore', { method: 'POST' });
+                const data = await response.json();
+                if (data.status === "success") {
+                    alert("Сотрудник " + fullName + " восстановлен!");
+                    const returnTo = new URLSearchParams(window.location.search).get('return_to');
+                    if (returnTo) {
+                        window.location.href = returnTo;
+                    } else {
+                        location.reload();
+                    }
+                } else {
+                    alert("Ошибка: " + (data.error || "Неизвестная ошибка"));
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Не удалось связаться с сервером");
+            }
+        }
+
+        // Если карточку открыли из журнала, показываем её сразу.
+        document.addEventListener('DOMContentLoaded', function () {
+            const empId = new URLSearchParams(window.location.search).get('open_employee');
+            if (empId) {
+                openEmployeeModal(empId);
+            }
+        });
     </script>
 </body>
 </html>
